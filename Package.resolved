@@ -1,0 +1,42 @@
+{
+  "originHash" : "865dbdf6bcd94e235b0279ccbfa1adef6429dee04a5e355e7fc1a6df405c2806",
+  "pins" : [
+    {
+      "identity" : "swift-a2a",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/no-problem-dev/swift-a2a.git",
+      "state" : {
+        "revision" : "c9675f1d165cedbb35fe82d290be56592125cf55",
+        "version" : "0.5.0"
+      }
+    },
+    {
+      "identity" : "swift-llm-client",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/no-problem-dev/swift-llm-client.git",
+      "state" : {
+        "revision" : "0d93be0785cff7435f57141380e856a23db917fc",
+        "version" : "3.4.0"
+      }
+    },
+    {
+      "identity" : "swift-structured-data",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/no-problem-dev/swift-structured-data.git",
+      "state" : {
+        "revision" : "0b0580351e5b944f99f8beff3ad5b6eed84f052d",
+        "version" : "1.3.0"
+      }
+    },
+    {
+      "identity" : "swift-syntax",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-syntax.git",
+      "state" : {
+        "revision" : "4799286537280063c85a32f09884cfbca301b1a1",
+        "version" : "602.0.0"
+      }
+    }
+  ],
+  "version" : 3
+}
