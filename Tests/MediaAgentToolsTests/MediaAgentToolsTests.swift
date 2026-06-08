@@ -251,6 +251,127 @@ extension MockHTTPClient.Route {
         ])
     }
 
+    @Test func toolSelectionKeepsCoreAndDropsDisabled() throws {
+        let full = MediaToolKit.gemini(
+            store: try makeStore(), geminiAPIKey: "k", serperAPIKey: "s"
+        )
+        // 全部オフを指定してもコアツールは残る。
+        #expect(full.tools(enabled: []).map(\.toolName) == [
+            "save_image_url", "save_video_reference", "list_saved_media",
+        ])
+        // 個別無効化: search 系だけ落とす。
+        let noSearch = MediaToolID.allTools.subtracting([.searchImages, .searchVideos])
+        #expect(full.tools(enabled: noSearch).map(\.toolName) == [
+            "generate_image", "save_image_url", "save_video_reference", "create_chart", "list_saved_media",
+        ])
+        // プロバイダ未構成のツールは enabled に含めても提供されない。
+        let bare = MediaToolKit(store: try makeStore(), http: MockHTTPClient(routes: []))
+        #expect(bare.tools(enabled: MediaToolID.allTools).map(\.toolName) == [
+            "save_image_url", "save_video_reference", "create_chart", "list_saved_media",
+        ])
+        #expect(bare.availableToolIDs == MediaToolID.coreTools.union([.createChart]))
+    }
+
+    @Test func toolDescriptionsPruneCrossReferences() throws {
+        let full = MediaToolKit.gemini(
+            store: try makeStore(), geminiAPIKey: "k", serperAPIKey: "s"
+        )
+        // generate_image だけ残す → 説明から search_images / create_chart への誘導が消える。
+        let generateOnly = full.tools(enabled: MediaToolID.coreTools.union([.generateImage]))
+        let generate = generateOnly.first { $0.toolName == "generate_image" }!
+        #expect(!generate.toolDescription.contains("search_images"))
+        #expect(!generate.toolDescription.contains("create_chart"))
+        let save = generateOnly.first { $0.toolName == "save_image_url" }!
+        #expect(save.toolDescription.contains("generate_image"))
+        // generate_image をオフ → save_image_url のフォールバック誘導が消える。
+        let noGenerate = full.tools(enabled: MediaToolID.allTools.subtracting([.generateImage]))
+        let saveNoGen = noGenerate.first { $0.toolName == "save_image_url" }!
+        #expect(!saveNoGen.toolDescription.contains("generate_image"))
+        let chart = noGenerate.first { $0.toolName == "create_chart" }!
+        #expect(!chart.toolDescription.contains("generate_image"))
+    }
+
+    // MARK: - generate_ui_image（オンデバイス生成）
+
+    /// data == nil で「実行時に生成不能」を再現する。
+    private struct StubOnDeviceGenerator: OnDeviceImageGenerating {
+        var data: Data?
+        func generateImage(prompt: String, style: String) async throws -> Data {
+            guard let data else { throw OnDeviceImageError.notSupported }
+            return data
+        }
+    }
+
+    @Test func onDeviceGeneratorAddsGenerateUIImageTool() throws {
+        let withOnDevice = MediaToolKit.gemini(
+            store: try makeStore(), geminiAPIKey: "k", serperAPIKey: "s",
+            onDeviceImageGenerator: StubOnDeviceGenerator(data: Data())
+        )
+        #expect(withOnDevice.tools.map(\.toolName) == [
+            "generate_image", "generate_ui_image", "search_images", "save_image_url",
+            "search_videos", "save_video_reference", "create_chart", "list_saved_media",
+        ])
+        // 非対応デバイス（generator nil）ではツール自体が編成に入らない。
+        let without = MediaToolKit.gemini(store: try makeStore(), geminiAPIKey: "k", serperAPIKey: "s")
+        #expect(!without.tools.map(\.toolName).contains("generate_ui_image"))
+        #expect(!without.availableToolIDs.contains(.generateUIImage))
+    }
+
+    @Test func generateUIImageStoresResult() async throws {
+        let store = try makeStore()
+        let kit = MediaToolKit(
+            store: store,
+            onDeviceImageGenerator: StubOnDeviceGenerator(data: makePNG(width: 1024, height: 1024)),
+            http: MockHTTPClient(routes: [])
+        )
+
+        let result = try await tool(named: "generate_ui_image", in: kit).execute(with: args([
+            "prompt": "soft gradient ocean backdrop",
+            "filename_hint": "ocean-backdrop",
+            "style": "illustration",
+        ]))
+
+        let payload = jsonObject(result)
+        #expect(payload["kind"] as? String == "generatedImage")
+        #expect((payload["media_url"] as? String)?.hasPrefix("media://") == true)
+        let items = await store.allItems()
+        #expect(items[0].prompt == "soft gradient ocean backdrop")
+    }
+
+    @Test func generateUIImageReturnsErrorWhenUnavailable() async throws {
+        let store = try makeStore()
+        let kit = MediaToolKit(
+            store: store,
+            onDeviceImageGenerator: StubOnDeviceGenerator(data: nil),
+            http: MockHTTPClient(routes: [])
+        )
+
+        // 構築時ゲートを通っても実行時に落ちたら、エラーが LLM へ返る（Gemini への自動フォールバックなし）。
+        let result = try await tool(named: "generate_ui_image", in: kit).execute(with: args([
+            "prompt": "x", "filename_hint": "x",
+        ]))
+
+        #expect(result.isError)
+        #expect(result.stringValue.contains("not available"))
+        #expect(await store.allItems().isEmpty)
+    }
+
+    @Test func generateUIImageDescriptionsPruneCrossReferences() throws {
+        let both = MediaToolKit.gemini(
+            store: try makeStore(), geminiAPIKey: "k",
+            onDeviceImageGenerator: StubOnDeviceGenerator(data: Data())
+        )
+        // 両方ある構成: 相互の使い分け誘導が載る。
+        let generate = both.tools.first { $0.toolName == "generate_image" }!
+        #expect(generate.toolDescription.contains("generate_ui_image"))
+        let uiImage = both.tools.first { $0.toolName == "generate_ui_image" }!
+        #expect(uiImage.toolDescription.contains("use generate_image instead"))
+        // generate_image をオフ → 対比の言及が消える。
+        let uiAlone = both.tools(enabled: MediaToolID.allTools.subtracting([.generateImage]))
+            .first { $0.toolName == "generate_ui_image" }!
+        #expect(!uiAlone.toolDescription.contains("use generate_image instead"))
+    }
+
     @Test func saveImageURLStoresValidatedImage() async throws {
         let store = try makeStore()
         let png = makePNG(width: 800, height: 600)
@@ -266,7 +387,9 @@ extension MockHTTPClient.Route {
 
         let payload = jsonObject(result)
         #expect(payload["filename"] as? String == "skyline.png")
-        #expect((payload["file_url"] as? String)?.hasPrefix("file://") == true)
+        // コンテナパス非依存の安定参照（media://<sessionID>/<filename>）であること
+        #expect((payload["media_url"] as? String)?.hasPrefix("media://") == true)
+        #expect((payload["media_url"] as? String)?.hasSuffix("/skyline.png") == true)
         #expect(payload["width"] as? Int == 800)
 
         let items = await store.allItems()
@@ -408,7 +531,8 @@ extension MockHTTPClient.Route {
         }
         #expect(entries.count == 1)
         #expect(entries[0]["alt"] as? String == "A")
-        #expect((entries[0]["file_url"] as? String)?.hasSuffix("a.png") == true)
+        #expect((entries[0]["media_url"] as? String)?.hasPrefix("media://") == true)
+        #expect((entries[0]["media_url"] as? String)?.hasSuffix("/a.png") == true)
     }
 }
 
@@ -419,8 +543,19 @@ extension MockHTTPClient.Route {
     @Test func agentCardDescribesSkills() {
         let card = VisualizerAgent.agentCard(interfaceURL: "inprocess://visualizer")
         #expect(card.name == "visualizer")
-        #expect(card.skills.map(\.id) == ["generate-image", "fetch-images", "video-references", "charts"])
+        #expect(card.skills.map(\.id) == [
+            "generate-image", "generate-ui-image", "fetch-images", "video-references", "charts",
+        ])
         #expect(card.capabilities.streaming == true)
+
+        // オンデバイス生成なしの構成ではスキルも消える。
+        let withoutOnDevice = VisualizerAgent.agentCard(
+            interfaceURL: "inprocess://visualizer",
+            tools: MediaToolID.allTools.subtracting([.generateUIImage])
+        )
+        #expect(withoutOnDevice.skills.map(\.id) == [
+            "generate-image", "fetch-images", "video-references", "charts",
+        ])
     }
 
     @Test func toolSetWrapsToolKit() throws {

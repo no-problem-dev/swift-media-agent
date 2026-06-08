@@ -140,6 +140,36 @@ public actor MediaSessionStore {
         directory.appendingPathComponent(item.filename)
     }
 
+    // MARK: - Stable references
+
+    /// コンテナパスに依存しない安定メディア参照のスキーム。
+    ///
+    /// 絶対 file:// パスはアプリの再インストール・再ビルドでコンテナ UUID が変わると
+    /// 死ぬため、LLM へ渡す参照・永続化される参照は `media://<sessionID>/<filename>`
+    /// に統一し、描画直前に `fileURL(forStable:)` で現在のコンテナへ解決する。
+    public static let stableScheme = "media"
+
+    /// アイテムの安定参照 URL（`media://<sessionID>/<filename>`）。
+    public nonisolated func stableURL(for item: MediaItem) -> URL {
+        URL(string: "\(Self.stableScheme)://\(sessionID)/\(item.filename)")!
+    }
+
+    /// 安定参照 URL を現在のコンテナの file URL へ解決する。
+    ///
+    /// URL の host getter は大文字小文字を正規化しうるため（sessionID は UUID 大文字、
+    /// iOS のデータコンテナはケースセンシティブ）、absoluteString を文字列として解析する。
+    public static func fileURL(forStable url: URL, rootDirectory: URL? = nil) -> URL? {
+        let prefix = "\(stableScheme)://"
+        let string = url.absoluteString
+        guard string.hasPrefix(prefix) else { return nil }
+        let parts = string.dropFirst(prefix.count).split(separator: "/", maxSplits: 1)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        let root = rootDirectory ?? defaultRootDirectory()
+        return root
+            .appendingPathComponent(String(parts[0]), isDirectory: true)
+            .appendingPathComponent(String(parts[1]))
+    }
+
     // MARK: - Naming
 
     /// ヒントを URL/ファイルシステム安全なスラグへ変換する。

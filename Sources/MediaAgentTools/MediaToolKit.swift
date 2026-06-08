@@ -13,6 +13,7 @@ import MediaStore
 public struct MediaToolKit: Sendable {
     public let store: MediaSessionStore
     let imageGenerator: (any ImageGenerating)?
+    let onDeviceImageGenerator: (any OnDeviceImageGenerating)?
     let imageSearch: (any ImageSearchProvider)?
     let videoSearch: (any VideoSearchProvider)?
     let chartRenderer: any ChartRendering
@@ -25,6 +26,7 @@ public struct MediaToolKit: Sendable {
     public init(
         store: MediaSessionStore,
         imageGenerator: (any ImageGenerating)? = nil,
+        onDeviceImageGenerator: (any OnDeviceImageGenerating)? = nil,
         imageSearch: (any ImageSearchProvider)? = nil,
         videoSearch: (any VideoSearchProvider)? = nil,
         chartRenderer: (any ChartRendering)? = nil,
@@ -34,6 +36,7 @@ public struct MediaToolKit: Sendable {
         let httpClient = http ?? URLSessionMediaHTTPClient(defaultTimeout: 30)
         self.store = store
         self.imageGenerator = imageGenerator
+        self.onDeviceImageGenerator = onDeviceImageGenerator
         self.imageSearch = imageSearch
         self.videoSearch = videoSearch
         self.chartRenderer = chartRenderer ?? QuickChartRenderer(http: httpClient)
@@ -47,32 +50,58 @@ public struct MediaToolKit: Sendable {
     }
 
     /// Gemini 画像生成 + Serper 検索の標準構成。
+    /// `onDeviceImageGenerator` はデバイスが対応する場合のみ渡す —
+    /// 非対応なら nil にしてツール自体を編成から外す（実行時失敗はツールがエラーを返す）。
     public static func gemini(
         store: MediaSessionStore,
         geminiAPIKey: String,
         imageModel: String = GeminiImageGenerator.defaultModel,
         serperAPIKey: String? = nil,
         gl: String? = nil,
-        hl: String? = nil
+        hl: String? = nil,
+        onDeviceImageGenerator: (any OnDeviceImageGenerating)? = nil
     ) -> MediaToolKit {
         let serper = serperAPIKey
             .flatMap { $0.isEmpty ? nil : SerperMediaSearchProvider(apiKey: $0, gl: gl, hl: hl) }
         return MediaToolKit(
             store: store,
             imageGenerator: GeminiImageGenerator(apiKey: geminiAPIKey, model: imageModel),
+            onDeviceImageGenerator: onDeviceImageGenerator,
             imageSearch: serper,
             videoSearch: serper
         )
     }
 
     public var tools: [any Tool] {
+        tools(enabled: MediaToolID.allTools)
+    }
+
+    /// 構成済みプロバイダから提供可能なツール ID（`tools(enabled:)` の上限）。
+    /// ホスト UI はこれで「キー未設定で使えないツール」を判別できる。
+    public var availableToolIDs: Set<MediaToolID> {
+        var ids = MediaToolID.coreTools
+        ids.insert(.createChart) // renderer は常に構成される
+        if imageGenerator != nil { ids.insert(.generateImage) }
+        if onDeviceImageGenerator != nil { ids.insert(.generateUIImage) }
+        if imageSearch != nil { ids.insert(.searchImages) }
+        if videoSearch != nil { ids.insert(.searchVideos) }
+        return ids
+    }
+
+    /// enabled で選別したツール一式。コアツールは常に含まれ、
+    /// プロバイダ未構成のツールは enabled に含めても落ちる。
+    /// ツール説明内のクロス参照（generate_image ↔ search_images ↔ create_chart）も
+    /// 同じセットで剪定されるため、存在しないツールへの誘導が説明文に残らない。
+    public func tools(enabled: Set<MediaToolID>) -> [any Tool] {
+        let effective = availableToolIDs.intersection(enabled.union(MediaToolID.coreTools))
         var tools: [any Tool] = []
-        if imageGenerator != nil { tools.append(generateImageTool) }
-        if imageSearch != nil { tools.append(searchImagesTool) }
-        tools.append(saveImageURLTool)
-        if videoSearch != nil { tools.append(searchVideosTool) }
+        if effective.contains(.generateImage) { tools.append(generateImageTool(peers: effective)) }
+        if effective.contains(.generateUIImage) { tools.append(generateUIImageTool(peers: effective)) }
+        if effective.contains(.searchImages) { tools.append(searchImagesTool) }
+        tools.append(saveImageURLTool(peers: effective))
+        if effective.contains(.searchVideos) { tools.append(searchVideosTool) }
         tools.append(saveVideoReferenceTool)
-        tools.append(createChartTool)
+        if effective.contains(.createChart) { tools.append(createChartTool(peers: effective)) }
         tools.append(listSavedMediaTool)
         return tools
     }
@@ -80,7 +109,9 @@ public struct MediaToolKit: Sendable {
     // MARK: - 共通の保存結果
 
     struct SavedAsset: Encodable {
-        let fileUrl: String
+        /// 安定参照（`media://<sessionID>/<filename>`）。絶対 file:// パスは
+        /// コンテナ UUID 依存でアーカイブ復元後に死ぬため、LLM へは渡さない。
+        let mediaUrl: String
         let filename: String
         let kind: String
         let mimeType: String
@@ -88,8 +119,8 @@ public struct MediaToolKit: Sendable {
         let height: Int?
         let reused: Bool
 
-        init(_ result: MediaSessionStore.SaveResult) {
-            fileUrl = result.fileURL.absoluteString
+        init(_ result: MediaSessionStore.SaveResult, store: MediaSessionStore) {
+            mediaUrl = store.stableURL(for: result.item).absoluteString
             filename = result.item.filename
             kind = result.item.kind.rawValue
             mimeType = result.item.mimeType
@@ -101,7 +132,7 @@ public struct MediaToolKit: Sendable {
 
     // MARK: - generate_image
 
-    private var generateImageTool: any Tool {
+    private func generateImageTool(peers: Set<MediaToolID>) -> any Tool {
         struct Args: Decodable {
             let prompt: String
             let filenameHint: String
@@ -111,12 +142,24 @@ public struct MediaToolKit: Sendable {
         let generator = imageGenerator!
         let store = store
         let policy = trustedPolicy
+        // 「代わりにこれを使え」の誘導は同伴するツールにだけ向ける。
+        let redirects = [
+            peers.contains(.searchImages) ? "search_images" : nil,
+            peers.contains(.createChart) ? "create_chart" : nil,
+        ].compactMap(\.self)
+        let prohibition = redirects.isEmpty
+            ? "Do NOT use for real people, products, places, or data charts."
+            : "Do NOT use for real people, products, places, or data charts (use \(redirects.joined(separator: " / ")) instead)."
+        // オンデバイス生成が同伴する構成では、装飾用途をそちらへ誘導する。
+        let decorationSteer = peers.contains(.generateUIImage)
+            ? " For purely decorative UI imagery where stylized output is fine, prefer generate_ui_image (free, on-device)."
+            : ""
         return MediaTool(
             name: "generate_image",
             description: """
-            Generate an image with an AI image model and save it to the session media directory. \
+            Generate a high-quality image with a cloud AI image model and save it to the session media directory. \
             Use for concept illustrations, hero/header art, and diagrams without exact numeric data. \
-            Do NOT use for real people, products, places, or data charts (use search_images / create_chart instead). \
+            \(prohibition)\(decorationSteer) \
             Write the prompt in English with concrete style, subject, and composition.
             """,
             inputSchema: .object(
@@ -148,7 +191,68 @@ public struct MediaToolKit: Sendable {
                 alt: args.altText ?? args.prompt,
                 prompt: args.prompt
             )
-            return try .encodedSnakeCase(SavedAsset(result))
+            return try .encodedSnakeCase(SavedAsset(result, store: store))
+        }
+    }
+
+    // MARK: - generate_ui_image
+
+    private func generateUIImageTool(peers: Set<MediaToolID>) -> any Tool {
+        struct Args: Decodable {
+            let prompt: String
+            let filenameHint: String
+            let style: String?
+            let altText: String?
+        }
+        let generator = onDeviceImageGenerator!
+        let store = store
+        let policy = trustedPolicy
+        // 高品質生成が同伴する構成でだけ「忠実度が要るならそちら」の対比を載せる。
+        let contrast = peers.contains(.generateImage)
+            ? " For high-quality concept art or anything needing fidelity, use generate_image instead."
+            : ""
+        return MediaTool(
+            name: "generate_ui_image",
+            description: """
+            Generate a decorative image ON-DEVICE with Apple's Image Playground model — free and fast, \
+            but stylized only (animation / illustration / sketch). \
+            Use for UI decoration where exact fidelity does not matter: ambient backdrops, thumbnails, \
+            playful spot illustrations, section accents. \
+            It cannot render photorealism, accurate text, real people/products, or precise diagrams.\(contrast) \
+            If this tool errors (on-device generation unavailable), report the asset on a `not found:` line — \
+            do NOT substitute another generator for it. \
+            Write the prompt in English, short and concrete.
+            """,
+            inputSchema: .object(
+                properties: [
+                    "prompt": .string(description: "Short English description of the decorative image (subject, mood, colors)"),
+                    "filename_hint": .string(description: "Short kebab-case base name for the saved file, e.g. 'ocean-backdrop'"),
+                    "style": .string(
+                        description: "Image Playground style (default animation)",
+                        enum: PlaygroundImageGenerator.styleNames
+                    ),
+                    "alt_text": .string(description: "Short accessibility description of the image content"),
+                ],
+                required: ["prompt", "filename_hint"]
+            )
+        ) { data in
+            let args = try ToolArgumentsDecoder.decode(Args.self, from: data)
+            let bytes = try await generator.generateImage(
+                prompt: args.prompt, style: args.style ?? "animation"
+            )
+            let validated = try ImageDataInspector.validate(bytes, policy: policy)
+            let result = try await store.save(
+                bytes,
+                filenameHint: args.filenameHint,
+                fileExtension: validated.format.fileExtension,
+                kind: .generatedImage,
+                mimeType: validated.format.mimeType,
+                width: validated.width,
+                height: validated.height,
+                alt: args.altText ?? args.prompt,
+                prompt: args.prompt
+            )
+            return try .encodedSnakeCase(SavedAsset(result, store: store))
         }
     }
 
@@ -190,7 +294,7 @@ public struct MediaToolKit: Sendable {
 
     // MARK: - save_image_url
 
-    private var saveImageURLTool: any Tool {
+    private func saveImageURLTool(peers: Set<MediaToolID>) -> any Tool {
         struct Args: Decodable {
             let url: String
             let filenameHint: String
@@ -200,16 +304,23 @@ public struct MediaToolKit: Sendable {
         let store = store
         let http = http
         let policy = policy
+        // 検証失敗時のフォールバック先・URL の出どころの言及も同伴ツールに合わせる。
+        let failureFallback = peers.contains(.generateImage)
+            ? "If validation fails, try another candidate or fall back to generate_image."
+            : "If validation fails, try another candidate."
+        let urlOrigin = peers.contains(.searchImages)
+            ? "Direct image URL (from search_images or a fetched page)"
+            : "Direct image URL (from the task input or a fetched page)"
         return MediaTool(
             name: "save_image_url",
             description: """
             Download an image from a URL, validate it (real image bytes, decodable, minimum size, sane aspect ratio), \
-            and save it to the session media directory. Returns the local file URL on success. \
-            If validation fails, try another candidate or fall back to generate_image.
+            and save it to the session media directory. Returns the stable media URL on success. \
+            \(failureFallback)
             """,
             inputSchema: .object(
                 properties: [
-                    "url": .string(description: "Direct image URL (from search_images or a fetched page)"),
+                    "url": .string(description: urlOrigin),
                     "filename_hint": .string(description: "Short kebab-case base name for the saved file"),
                     "alt_text": .string(description: "Short description of the image content (for accessibility and captions)"),
                     "page_url": .string(description: "URL of the page the image came from (used as Referer and recorded as the source)"),
@@ -237,7 +348,7 @@ public struct MediaToolKit: Sendable {
                 sourceURL: args.url,
                 pageURL: args.pageUrl
             )
-            return try .encodedSnakeCase(SavedAsset(result))
+            return try .encodedSnakeCase(SavedAsset(result, store: store))
         }
     }
 
@@ -324,7 +435,7 @@ public struct MediaToolKit: Sendable {
                 videoTitle: info.title
             )
             return try .encodedSnakeCase(Response(
-                thumbnail: SavedAsset(result),
+                thumbnail: SavedAsset(result, store: store),
                 videoUrl: args.videoUrl,
                 title: info.title,
                 author: info.authorName
@@ -334,7 +445,7 @@ public struct MediaToolKit: Sendable {
 
     // MARK: - create_chart
 
-    private var createChartTool: any Tool {
+    private func createChartTool(peers: Set<MediaToolID>) -> any Tool {
         struct Args: Decodable {
             let title: String
             let chartConfig: String
@@ -345,11 +456,15 @@ public struct MediaToolKit: Sendable {
         let store = store
         let renderer = chartRenderer
         let policy = trustedPolicy
+        // generate_image が同伴しない構成では対比の言及を落とす。
+        let usage = peers.contains(.generateImage)
+            ? "Use this — never generate_image — whenever exact numeric data must be visualized."
+            : "Use this whenever exact numeric data must be visualized."
         return MediaTool(
             name: "create_chart",
             description: """
             Render a data chart from a Chart.js v4 configuration and save it as a PNG. \
-            Use this — never generate_image — whenever exact numeric data must be visualized. \
+            \(usage) \
             Use ONLY numbers that appear in the task input or were gathered during research; never invent values. \
             Keep labels short and include units in the title or axis labels.
             """,
@@ -385,7 +500,7 @@ public struct MediaToolKit: Sendable {
                 alt: args.title,
                 chartSpec: args.chartConfig
             )
-            return try .encodedSnakeCase(SavedAsset(result))
+            return try .encodedSnakeCase(SavedAsset(result, store: store))
         }
     }
 
@@ -393,7 +508,7 @@ public struct MediaToolKit: Sendable {
 
     private var listSavedMediaTool: any Tool {
         struct Entry: Encodable {
-            let fileUrl: String
+            let mediaUrl: String
             let kind: String
             let alt: String?
             let width: Int?
@@ -405,7 +520,7 @@ public struct MediaToolKit: Sendable {
         return MediaTool(
             name: "list_saved_media",
             description: """
-            List all media saved in this session with their local file URLs. \
+            List all media saved in this session with their stable media URLs. \
             Call this before writing your final reply to compose the asset manifest.
             """,
             inputSchema: .object(properties: [:])
@@ -413,7 +528,7 @@ public struct MediaToolKit: Sendable {
             let items = await store.allItems()
             let entries = items.map { item in
                 Entry(
-                    fileUrl: store.fileURL(for: item).absoluteString,
+                    mediaUrl: store.stableURL(for: item).absoluteString,
                     kind: item.kind.rawValue,
                     alt: item.alt,
                     width: item.width,

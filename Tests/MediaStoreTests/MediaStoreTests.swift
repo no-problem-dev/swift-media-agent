@@ -170,6 +170,28 @@ func makeTempRoot() -> URL {
         #expect(MediaSessionStore.slugify("東京タワー") == "media")
         #expect(MediaSessionStore.slugify("a_b/c d") == "a-b-c-d")
     }
+
+    @Test func stableURLRoundTripsToFileURL() async throws {
+        // sessionID は UUID 大文字 — URL host の大小文字正規化に巻き込まれないこと
+        let sessionID = "ABC123DE-0000-4000-8000-1234567890AB"
+        let root = makeTempRoot()
+        let store = try MediaSessionStore(rootDirectory: root, sessionID: sessionID)
+        let result = try await store.save(
+            makePNG(width: 400, height: 300),
+            filenameHint: "hero", fileExtension: "png", kind: .generatedImage, mimeType: "image/png"
+        )
+
+        let stable = store.stableURL(for: result.item)
+        #expect(stable.absoluteString == "media://\(sessionID)/hero.png")
+
+        let resolved = MediaSessionStore.fileURL(forStable: stable, rootDirectory: root)
+        #expect(resolved?.path == result.fileURL.path)
+    }
+
+    @Test func fileURLForStableRejectsForeignURLs() {
+        #expect(MediaSessionStore.fileURL(forStable: URL(string: "https://example.com/a.png")!) == nil)
+        #expect(MediaSessionStore.fileURL(forStable: URL(string: "media://only-session-id")!) == nil)
+    }
 }
 
 extension JSONDecoder {
