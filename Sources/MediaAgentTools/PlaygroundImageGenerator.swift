@@ -12,7 +12,12 @@ import UniformTypeIdentifiers
 /// クラウド = 高品質なコンセプトアート・図解、オンデバイス = UI 装飾用の軽量画像。
 public protocol OnDeviceImageGenerating: Sendable {
     /// プロンプトとスタイル名から画像を 1 枚生成し、PNG バイト列を返す。
-    /// 実行時に生成不能（Apple Intelligence 無効化・モデル未ダウンロード等）なら throw する。
+    ///
+    /// デバイスが非対応またはモデル未ダウンロードの場合は `OnDeviceImageError.notSupported` をスロー。
+    ///
+    /// - Parameters:
+    ///   - prompt: 英語の短いプロンプト（被写体・雰囲気・色合い）
+    ///   - style: スタイル名（`"animation"`, `"illustration"`, `"sketch"` のいずれか）
     func generateImage(prompt: String, style: String) async throws -> Data
 }
 

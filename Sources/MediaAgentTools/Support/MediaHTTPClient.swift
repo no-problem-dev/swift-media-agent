@@ -17,7 +17,9 @@ public enum MediaHTTPError: Error, Sendable, LocalizedError {
     }
 }
 
-/// URLSession ベースの既定実装。
+/// `MediaHTTPClient` の URLSession ベースの標準実装。
+///
+/// `session` と `defaultTimeout` を注入してテストや特殊ネットワーク構成に対応できる。
 public struct URLSessionMediaHTTPClient: MediaHTTPClient {
     public let session: URLSession
     public let defaultTimeout: TimeInterval

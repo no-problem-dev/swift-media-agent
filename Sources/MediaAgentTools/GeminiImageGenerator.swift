@@ -2,7 +2,12 @@ import Foundation
 
 /// 画像生成のシーム。テストではモックに差し替える。
 public protocol ImageGenerating: Sendable {
-    /// プロンプトから画像を生成し、画像バイト列（通常 PNG）を返す。
+    /// プロンプトから画像を生成し、画像バイト列（通常 PNG）の配列を返す。
+    ///
+    /// - Parameters:
+    ///   - prompt: 英語の画像プロンプト（被写体・スタイル・構図を具体的に記述）
+    ///   - aspectRatio: アスペクト比（`"1:1"`, `"16:9"` 等）。`nil` で実装依存のデフォルト
+    ///   - count: 生成枚数
     func generateImages(prompt: String, aspectRatio: String?, count: Int) async throws -> [Data]
 }
 

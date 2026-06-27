@@ -1,8 +1,11 @@
 import CryptoKit
 import Foundation
 
+/// `MediaSessionStore` の操作が失敗したときにスローされるエラー。
 public enum MediaStoreError: Error, Sendable, LocalizedError {
+    /// セッションディレクトリの作成に失敗した。パスを添付する。
     case directoryCreationFailed(String)
+    /// ファイルの書き込みに失敗した。パスを添付する。
     case writeFailed(String)
 
     public var errorDescription: String? {
@@ -69,7 +72,9 @@ public actor MediaSessionStore {
 
     // MARK: - Save
 
-    /// 保存結果。`reused` は同一内容が既に保存済みで再利用されたことを示す。
+    /// `save(_:...)` の戻り値。保存されたアイテム・ファイル URL・重複排除フラグを含む。
+    ///
+    /// `reused == true` の場合はファイルを書かず既存アイテムを返した（SHA-256 一致）。
     public struct SaveResult: Sendable {
         public let item: MediaItem
         public let fileURL: URL
@@ -132,8 +137,12 @@ public actor MediaSessionStore {
 
     // MARK: - Read
 
+    /// セッションに保存されたメディアアイテムを保存順に全件返す。
     public func allItems() -> [MediaItem] { manifest.items }
 
+    /// 現在のマニフェストのスナップショットを返す。
+    ///
+    /// 返値はコピーであり、その後の `save` 呼び出しの影響を受けない。
     public func currentManifest() -> MediaManifest { manifest }
 
     public nonisolated func fileURL(for item: MediaItem) -> URL {

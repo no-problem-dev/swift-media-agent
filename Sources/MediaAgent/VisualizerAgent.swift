@@ -166,7 +166,10 @@ public enum VisualizerAgent {
         )
     }
 
-    /// ツール一式を ToolSet として返す。
+    /// `MediaToolKit` のツール一式を `ToolSet` としてラップする。
+    ///
+    /// `LLMAgentExecutor` に渡す際のアダプター。`systemPrompt(tools:)` と同じ `enabled` セットで
+    /// 構築した `MediaToolKit.tools` を内包するため、プロンプトとツールの整合が保たれる。
     public static func toolSet(_ toolKit: MediaToolKit) -> ToolSet {
         ToolSet(tools: toolKit.tools)
     }

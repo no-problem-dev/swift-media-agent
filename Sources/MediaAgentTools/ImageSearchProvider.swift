@@ -17,7 +17,9 @@ public struct ImageSearchHit: Sendable, Codable, Equatable {
     }
 }
 
+/// Web 画像検索の抽象。`MediaToolKit` に注入してテストでモックに差し替える。
 public protocol ImageSearchProvider: Sendable {
+    /// クエリで画像を検索し、最大 `count` 件の候補を返す。
     func searchImages(query: String, count: Int) async throws -> [ImageSearchHit]
 }
 
@@ -36,7 +38,9 @@ public struct VideoSearchHit: Sendable, Codable, Equatable {
     }
 }
 
+/// Web 動画検索の抽象。`MediaToolKit` に注入してテストでモックに差し替える。
 public protocol VideoSearchProvider: Sendable {
+    /// クエリで動画を検索し、最大 `count` 件の候補を返す。
     func searchVideos(query: String, count: Int) async throws -> [VideoSearchHit]
 }
 

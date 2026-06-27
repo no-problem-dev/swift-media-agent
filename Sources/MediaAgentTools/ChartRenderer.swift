@@ -6,6 +6,12 @@ import Foundation
 /// （数値とバーの対応が保証されない）ため、宣言仕様 → 決定論的レンダリングを使う。
 /// 仕様 JSON 自体も manifest に保持し、将来のネイティブ（Swift Charts）描画へ移行可能にする。
 public protocol ChartRendering: Sendable {
+    /// Chart.js v4 設定 JSON から画像をレンダリングして PNG バイト列を返す。
+    ///
+    /// - Parameters:
+    ///   - chartConfigJSON: Chart.js v4 形式の JSON 文字列
+    ///   - width: チャートの幅（ポイント）
+    ///   - height: チャートの高さ（ポイント）
     func render(chartConfigJSON: String, width: Int, height: Int) async throws -> Data
 }
 

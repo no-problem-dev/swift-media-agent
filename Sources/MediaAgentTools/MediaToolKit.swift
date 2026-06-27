@@ -72,6 +72,9 @@ public struct MediaToolKit: Sendable {
         )
     }
 
+    /// 構成済みプロバイダすべてが提供するツール一式（全 ID が有効）。
+    ///
+    /// 特定ツールを除外したい場合は `tools(enabled:)` を使う。
     public var tools: [any Tool] {
         tools(enabled: MediaToolID.allTools)
     }
