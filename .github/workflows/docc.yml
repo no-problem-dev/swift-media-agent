@@ -33,7 +33,8 @@ jobs:
         run: |
           swift package --allow-writing-to-directory ./docs \
             generate-documentation \
-            --target MediaStore \
+            --enable-experimental-combined-documentation \
+            --target MediaStore --target MediaAgentTools --target MediaAgent \
             --disable-indexing \
             --transform-for-static-hosting \
             --hosting-base-path swift-media-agent \
