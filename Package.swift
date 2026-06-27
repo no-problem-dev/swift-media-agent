@@ -10,6 +10,7 @@ let package = Package(
         .library(name: "MediaAgent", targets: ["MediaAgent"]),
     ],
     dependencies: [
+        .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.4.0"),
         // Tool プロトコル・JSONSchema・SystemPrompt（プロバイダー非依存の契約層）
         .package(url: "https://github.com/no-problem-dev/swift-llm-client.git", from: "3.4.0"),
         // AgentCard（A2A エージェントとしての自己記述）
