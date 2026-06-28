@@ -4,15 +4,15 @@ visualizer エージェントの定義層。システムプロンプト・AgentC
 
 ## Overview
 
-`MediaAgent` は `VisualizerAgent` という 1 つの名前空間型を提供します。実行系（LLM クライアント・A2A executor）には依存せず、「役割（system prompt）・自己記述（AgentCard）・道具（ToolSet）」の 3 点を組み立てる責務のみを担います。
+`MediaAgent` は `VisualizerAgent` という 1 つの名前空間型を提供する。実行系（LLM クライアント・A2A executor）には依存せず、「役割（system prompt）・自己記述（AgentCard）・道具（ToolSet）」の 3 点を組み立てる責務のみを担う。
 
-**設計の核心**: 有効ツール ID (`Set<MediaToolID>`) を唯一の入力とし、プロンプト・AgentCard・ToolSet の 3 要素を同じセットから生成することで整合性を保証します。
+**設計の核心**: 有効ツール ID (`Set<MediaToolID>`) を唯一の入力とし、プロンプト・AgentCard・ToolSet の 3 要素を同じセットから生成することで整合性を保証する。
 
-このパッケージは 3 つのライブラリモジュールで構成されています。
+このパッケージは 3 つのライブラリモジュールで構成される。
 
-- **`MediaAgent`**（このモジュール）— エージェント定義層。`VisualizerAgent` がシステムプロンプト・A2A `AgentCard`・`ToolSet` を有効ツール構成から導出します。実行系には依存しないため、任意の LLM クライアント・A2A executor と組み合わせられます。
-- **`MediaAgentTools`** — ツール実装層。`MediaToolKit` が画像生成（クラウド・オンデバイス）・Web 画像検索・チャートレンダリング・YouTube 動画参照の LLM ツールをアセンブルします。どの能力を有効にするかは `MediaToolID` の集合で制御します。
-- **`MediaStore`** — ストレージ層。`MediaSessionStore` が取得・生成した画像バイトをセッション単位で保存し `manifest.json` で台帳化します。SHA-256 重複排除と `media://` スキームの安定 URL を提供し、iOS コンテナ UUID の変化に対してロバストな参照を実現します。
+- **`MediaAgent`**（このモジュール）— エージェント定義層。`VisualizerAgent` がシステムプロンプト・A2A `AgentCard`・`ToolSet` を有効ツール構成から導出する。実行系には依存しないため、任意の LLM クライアント・A2A executor と組み合わせられる。
+- **`MediaAgentTools`** — ツール実装層。`MediaToolKit` が画像生成（クラウド・オンデバイス）・Web 画像検索・チャートレンダリング・YouTube 動画参照の LLM ツールをアセンブルする。どの能力を有効にするかは `MediaToolID` の集合で制御する。
+- **`MediaStore`** — ストレージ層。`MediaSessionStore` が取得・生成した画像バイトをセッション単位で保存し `manifest.json` で台帳化する。SHA-256 重複排除と `media://` スキームの安定 URL を提供し、iOS コンテナ UUID の変化に対してロバストな参照を実現する。
 
 ```swift
 import MediaAgent
@@ -41,7 +41,7 @@ let toolSet = VisualizerAgent.toolSet(kit)              // ToolSet for LLMAgentE
 
 ## Topics
 
-### Essentials
+### はじめに
 
 - <doc:GettingStarted>
 

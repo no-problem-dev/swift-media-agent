@@ -145,6 +145,11 @@ public actor MediaSessionStore {
     /// 返値はコピーであり、その後の `save` 呼び出しの影響を受けない。
     public func currentManifest() -> MediaManifest { manifest }
 
+    /// アイテムの絶対 file URL。
+    ///
+    /// `nonisolated` のため actor のアイソレーションを取らずに呼び出せる。
+    /// ただし戻り値はコンテナパスに依存するため、長期保存や LLM への参照渡しには
+    /// `stableURL(for:)` を使い、描画直前に `fileURL(forStable:)` で解決すること。
     public nonisolated func fileURL(for item: MediaItem) -> URL {
         directory.appendingPathComponent(item.filename)
     }

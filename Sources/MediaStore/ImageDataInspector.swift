@@ -65,6 +65,10 @@ public struct ValidatedImage: Sendable, Equatable {
     public let height: Int
 }
 
+/// `ImageDataInspector.validate(_:policy:)` が検証失敗時にスローするエラー。
+///
+/// `bodyPrefix` などの連想値には診断用の文脈情報が格納されるため、
+/// ログや UI のフォールバックメッセージ生成に利用できる。
 public enum ImageValidationError: Error, Sendable, Equatable, LocalizedError {
     /// 画像のマジックバイトではない（HTML エラーページ等）
     case notAnImage(bodyPrefix: String)

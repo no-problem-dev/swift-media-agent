@@ -2,15 +2,15 @@
 
 セッションストアのセットアップから画像の保存・安定 URL 解決までの基本的な使い方。
 
-## Installation
+## インストール
 
-`Package.swift` の `dependencies` に追加します:
+`Package.swift` の `dependencies` に追加する:
 
 ```swift
 .package(url: "https://github.com/no-problem-dev/swift-media-agent.git", from: "0.1.0")
 ```
 
-ターゲットの `dependencies` に `MediaStore` を追加します:
+ターゲットの `dependencies` に `MediaStore` を追加する:
 
 ```swift
 .target(
@@ -21,7 +21,7 @@
 )
 ```
 
-## Basic Usage
+## 基本的な使い方
 
 ### ストアの作成
 
@@ -40,8 +40,8 @@ let store = try MediaSessionStore(
 
 ### 画像を検証してから保存する
 
-`ImageDataInspector.validate(_:policy:)` でマジックバイト・寸法・アスペクト比を検証した後にのみ保存します。
-HTML エラーページやトラッカー画像の混入を防ぐための重要なゲートです。
+`ImageDataInspector.validate(_:policy:)` でマジックバイト・寸法・アスペクト比を検証した後にのみ保存する。
+HTML エラーページやトラッカー画像の混入を防ぐための重要なゲート。
 
 ```swift
 do {
@@ -70,7 +70,7 @@ do {
 
 ### 安定 URL を使う
 
-iOS ではアプリの再インストールでコンテナパスが変わるため、LLM への参照渡しや永続化には `media://` スキームを使います。
+iOS ではアプリの再インストールでコンテナパスが変わるため、LLM への参照渡しや永続化には `media://` スキームを使う。
 
 ```swift
 // 保存時に安定 URL を取得

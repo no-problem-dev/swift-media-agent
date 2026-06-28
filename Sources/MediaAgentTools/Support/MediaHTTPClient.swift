@@ -2,9 +2,11 @@ import Foundation
 
 /// メディア取得・API 呼び出しの HTTP シーム。テストではモックに差し替える。
 public protocol MediaHTTPClient: Sendable {
+    /// URLRequest を送信し、ステータスコードに関わらず (Data, HTTPURLResponse) を返す。
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
 }
 
+/// メディア HTTP クライアントが返すエラー。
 public enum MediaHTTPError: Error, Sendable, LocalizedError {
     case invalidResponse
     case status(Int, bodyPrefix: String)

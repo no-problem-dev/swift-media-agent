@@ -4,10 +4,10 @@ visualizer エージェントにメディア調達能力を与えるツール実
 
 ## Overview
 
-`MediaAgentTools` は `MediaToolKit` を中心に構成されたツール実装モジュールです。
-クラウド画像生成（Gemini）・オンデバイス生成（Apple Image Playground）・Web 画像検索（Serper）・データチャート（QuickChart.io）・YouTube 動画参照の 5 種類の能力を、`MediaToolID` というツール ID の集合によって選択的に組み合わせられます。
+`MediaAgentTools` は `MediaToolKit` を中心に構成されたツール実装モジュール。
+クラウド画像生成（Gemini）・オンデバイス生成（Apple Image Playground）・Web 画像検索（Serper）・データチャート（QuickChart.io）・YouTube 動画参照の 5 種類の能力を、`MediaToolID` というツール ID の集合によって選択的に組み合わせられる。
 
-`MediaToolKit` の初期化には `MediaStore.MediaSessionStore` を渡します。取得・生成したバイトはすべて `MediaStore` のセッションディレクトリに検証・保存されるため、ホットリンク切れや署名期限切れに依存しないリホスト済みアセットが得られます。
+`MediaToolKit` の初期化には `MediaStore.MediaSessionStore` を渡す。取得・生成したバイトはすべて `MediaStore` のセッションディレクトリに検証・保存されるため、ホットリンク切れや署名期限切れに依存しないリホスト済みアセットが得られる。
 
 ```swift
 import MediaAgent
@@ -36,8 +36,8 @@ let prompt = VisualizerAgent.systemPrompt(tools: available)
 
 ### ツール選択の設計方針
 
-`MediaToolID` の `isCore` プロパティが `true` のツール（`saveImageURL`, `saveVideoReference`, `listSavedMedia`）は無効化できないコアツールです。
-`generateImage`, `generateUIImage`, `searchImages`, `searchVideos`, `createChart` はプロバイダが構成されている場合のみ `availableToolIDs` に現れ、未構成のまま `enabled` に含めても提供されません。
+`MediaToolID` の `isCore` プロパティが `true` のツール（`saveImageURL`, `saveVideoReference`, `listSavedMedia`）は無効化できないコアツールだ。
+`generateImage`, `generateUIImage`, `searchImages`, `searchVideos`, `createChart` はプロバイダが構成されている場合のみ `availableToolIDs` に現れ、未構成のまま `enabled` に含めても提供されない。
 
 ```swift
 // カスタム構成：チャートと URL 保存のみ（検索・生成なし）

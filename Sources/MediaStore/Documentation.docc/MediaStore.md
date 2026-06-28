@@ -4,7 +4,7 @@
 
 ## Overview
 
-`MediaStore` は UI レイヤーや LLM クライアントに依存しない純粋なストレージ層です。AI エージェントが生成または取得したメディア（画像・チャート・動画サムネイル）を、セッション単位でファイルシステムに保存し `manifest.json` で台帳化します。
+`MediaStore` は UI レイヤーや LLM クライアントに依存しない純粋なストレージ層。AI エージェントが生成または取得したメディア（画像・チャート・動画サムネイル）を、セッション単位でファイルシステムに保存し `manifest.json` で台帳化する。
 
 主な特徴:
 
@@ -39,7 +39,7 @@ let stableURL = store.stableURL(for: result.item)
 
 ## Topics
 
-### Essentials
+### はじめに
 
 - <doc:GettingStarted>
 

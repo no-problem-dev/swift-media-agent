@@ -1,56 +1,58 @@
+English | [日本語](./README.ja.md)
+
 # swift-media-agent
 
-A2A マルチエージェント構成で **UI に表示するメディア要素（画像・動画参照・チャート）を準備する専門エージェント**を実装するための Swift パッケージ。
+A Swift package for implementing a **visual asset preparation specialist agent** in A2A multi-agent architectures — sourcing images, video references, and charts for UI display.
 
-リサーチ等のタスクを終えたオーケストレータが UI（A2UI surface）を描画する一歩手前で、
-この visualizer エージェントに委譲してビジュアル素材を揃え、ローカル file URL のマニフェストとして受け取る。
+An orchestrator that finishes a research task delegates to this visualizer agent to gather visual assets, and receives back a manifest of `media://` stable URLs; call `MediaSessionStore.fileURL(forStable:)` to resolve each URL to a local file URL before passing to the UI (A2UI surface).
 
 ```
-HostAgent ──send_message──> visualizer ──tools──> 生成 / 検索 / 検証 / 保存
+HostAgent ──send_message──> visualizer ──tools──> generate / search / validate / save
                                  │
-                                 └─> セッションディレクトリ + manifest.json
-                                       └─> file:// URL を A2UI Image にそのまま使える
+                                 └─> session directory + manifest.json
+                                       └─> media:// stable URLs → fileURL(forStable:) before A2UI
 ```
 
-## 設計原則
+## Design Principles
 
-1. **URL を信用せず、バイトを保存（リホスト）する** — リモート画像 URL は hotlink 防止・署名付き URL の期限切れ・将来の 404 でいつか必ず死ぬ。検証済みバイトをセッションディレクトリに保存すればすべて無効化される
-2. **保存前に必ず検証する** — Content-Type ヘッダではなくマジックバイトで画像判定し、ImageIO で実寸法を確認、最小サイズ・極端なアスペクト比を弾く（HEAD は 405 を返すサーバがあるため使わない）
-3. **数値データのチャートを画像生成 AI に描かせない** — Chart.js 宣言仕様 → 決定論的レンダリング（QuickChart）。仕様 JSON も manifest に保持し、将来のネイティブ（Swift Charts カタログ）描画へ移行可能
-4. **検索 → 不適なら生成へフォールバック** — 実在物は検索、概念図・挿絵は生成、というルーティングを system prompt が指示する
-5. **セッションスコープ + べき等** — Google ADK ArtifactService を踏襲。内容ハッシュで重複排除、同名はバージョン付与、manifest.json から復元可能
+1. **Rehosts bytes, never trusts URLs** — Remote image URLs will eventually break (hotlink protection, expiring signed URLs, future 404s). Saving validated bytes locally eliminates all of these.
+2. **Always validate before saving** — Images are checked by magic bytes (not Content-Type headers), then decoded with ImageIO to verify dimensions, minimum size, and aspect ratio (HEAD requests are skipped because some servers return 405).
+3. **Never use image generation AI for numeric charts** — Uses declarative Chart.js specs → deterministic rendering (QuickChart). The spec JSON is kept in the manifest for future native (Swift Charts) rendering.
+4. **Search first, generate as fallback** — Real-world subjects use search; concept art and illustrations use generation; the system prompt instructs this routing.
+5. **Session-scoped + idempotent** — Follows Google ADK ArtifactService: SHA-256 deduplication, versioned filenames on collision, recoverable from manifest.json.
 
-## ターゲット構成
+## Target Structure
 
-| ターゲット | 責務 | 依存 |
+| Target | Responsibility | Dependencies |
 |---|---|---|
-| `MediaStore` | セッション別ファイルストア・manifest・画像バイト検証 | Foundation / ImageIO のみ |
-| `MediaAgentTools` | LLM ツール群 + プロバイダー（Gemini 生成 / Serper 検索 / oEmbed / QuickChart） | MediaStore, LLMTool |
-| `MediaAgent` | visualizer エージェントの定義（system prompt / AgentCard / ToolSet） | MediaAgentTools, A2ACore |
+| `MediaStore` | Session-scoped file store, manifest, image byte validation | Foundation / ImageIO only |
+| `MediaAgentTools` | LLM tool set + providers (Gemini generation / Serper search / oEmbed / QuickChart) | MediaStore, LLMTool |
+| `MediaAgent` | Visualizer agent definition (system prompt / AgentCard / ToolSet) | MediaAgentTools, A2ACore |
 
-## 提供ツール
+## Available Tools
 
-| ツール | 役割 |
+| Tool | Role |
 |---|---|
-| `generate_image` | Gemini 画像生成 → 検証 → 保存。概念図・挿絵・ヒーロー画像向け |
-| `search_images` | Serper 画像検索。候補 URL とサイズを返す（保存はまだしない） |
-| `save_image_url` | 画像 URL をダウンロード → マジックバイト/寸法/アスペクト比検証 → 保存 |
-| `search_videos` | Serper 動画検索 |
-| `save_video_reference` | YouTube oEmbed で存在検証 → サムネイル保存（maxres → hq フォールバック） |
-| `create_chart` | Chart.js config → QuickChart → PNG 保存（chartSpec も台帳に保持） |
-| `list_saved_media` | セッションの保存済みメディア一覧（最終マニフェスト作成用） |
+| `generate_image` | Gemini image generation → validation → save. For concept art, illustrations, hero images. |
+| `generate_ui_image` | Apple Image Playground on-device generation → validation → save. For decorative UI imagery. Requires Apple Intelligence. |
+| `search_images` | Serper image search. Returns candidate URLs with sizes (not saved yet). |
+| `save_image_url` | Download image URL → magic byte/dimension/aspect ratio validation → save. |
+| `search_videos` | Serper video search. |
+| `save_video_reference` | Verify via YouTube oEmbed → save thumbnail (maxres → hq fallback). |
+| `create_chart` | Chart.js config → QuickChart → PNG save (chartSpec also stored in manifest). |
+| `list_saved_media` | List all saved media in the session (for final manifest creation). |
 
-## 使い方
+## Usage
 
 ```swift
 import MediaAgent
 import MediaAgentTools
 import MediaStore
 
-// 1. 会話セッションごとにストアを作る
+// 1. Create a store per conversation session
 let store = try MediaSessionStore(sessionID: sessionID)
 
-// 2. ツールキットを組む（Serper キーが無ければ検索ツールは自動で外れる）
+// 2. Assemble the toolkit (search tools are excluded automatically if Serper key is absent)
 let toolKit = MediaToolKit.gemini(
     store: store,
     geminiAPIKey: geminiKey,
@@ -58,7 +60,7 @@ let toolKit = MediaToolKit.gemini(
     gl: "jp", hl: "ja"
 )
 
-// 3. 他のワーカーと同じ手順でエージェント化する（A2AResearchDemo の例）
+// 3. Initialize the agent using the same procedure as other workers (see A2AResearchDemo)
 let executor = LLMAgentExecutor(
     client: gemini,
     model: model,
@@ -70,13 +72,13 @@ let card = VisualizerAgent.agentCard(interfaceURL: "inprocess://visualizer")
 let client = A2AClient.inProcess(handler: DefaultRequestHandler(agentCard: card, executor: executor))
 ```
 
-visualizer の返答は `- kind | file URL | alt | suggested placement` 形式のマニフェスト。
-file URL は A2UI の `Image.url` にそのまま渡せる（レンダラーの `AsyncImage` は file URL を読める）。
+The visualizer's reply is a manifest in the format `- kind | media URL | alt | suggested placement`.
+`media://` stable URLs must be resolved to file URLs via `MediaSessionStore.fileURL(forStable:)` before passing to A2UI's `Image.url`.
 
-## 既知の判断・制約
+## Known Decisions & Constraints
 
-- **Gemini 画像生成は REST 直叩きの自己完結実装**（`GeminiImageGenerator`）。本来は swift-llm-cloud の責務だが、公開版 `GeminiImageModel` が旧世代のみ（Imagen 4 は 2026-06-24 シャットダウン、`gemini-2.0-flash-exp-image-generation` は廃止済み）のため、現行モデル `gemini-2.5-flash-image`（既定）/ `gemini-3.1-flash-image` / `gemini-3-pro-image` を文字列指定で使う。upstream のモデルカタログ更新後に差し替える
-- `imageConfig.aspectRatio` は API リビジョン間でフィールド名が揺れているため、未知フィールドの 400 はアスペクト指定なしで 1 回リトライする
-- 画像検索は Serper（Google Images）。Bing Image Search API は 2025-08 廃止、Google Custom Search JSON API は 2027-01 廃止予定のため採用しない
-- 生成画像には SynthID（不可視透かし）が常に埋め込まれる（API 仕様）
-- 動画は本体を保存せず「サムネイル + 参照 URL」。oEmbed の成功が存在検証を兼ねる
+- **Gemini image generation is a self-contained REST implementation** (`GeminiImageGenerator`). It belongs in swift-llm-cloud, but the public `GeminiImageModel` only supports legacy models (Imagen 4 shut down 2026-06-24, `gemini-2.0-flash-exp-image-generation` is deprecated). Current models — `gemini-3.1-flash-image` (default) / `gemini-2.5-flash-image` / `gemini-3-pro-image` — are specified by string until upstream updates its model catalog.
+- `imageConfig.aspectRatio` field names vary across API revisions; a 400 error for unknown fields retries once without aspect ratio.
+- Image search uses Serper (Google Images). Bing Image Search API was retired in 2025-08; Google Custom Search JSON API is planned for retirement in 2027-01.
+- Generated images always have SynthID (invisible watermark) embedded per API specification.
+- Videos are stored as "thumbnail + reference URL" only — the video itself is never saved. Successful oEmbed serves as the existence verification.
