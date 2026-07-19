@@ -42,6 +42,23 @@ HostAgent ──send_message──> visualizer ──tools──> generate / sea
 | `create_chart` | Chart.js config → QuickChart → PNG save (chartSpec also stored in manifest). |
 | `list_saved_media` | List all saved media in the session (for final manifest creation). |
 
+## Installation
+
+```swift
+// Package.swift
+dependencies: [
+    .package(url: "https://github.com/no-problem-dev/swift-media-agent.git", from: "0.1.0")
+]
+```
+
+```swift
+.target(name: "YourTarget", dependencies: [
+    .product(name: "MediaAgent", package: "swift-media-agent"),      // agent definition (prompt / AgentCard / ToolSet)
+    .product(name: "MediaAgentTools", package: "swift-media-agent"), // LLM tool set + providers
+    .product(name: "MediaStore", package: "swift-media-agent"),      // session-scoped file store
+])
+```
+
 ## Usage
 
 ```swift

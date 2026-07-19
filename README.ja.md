@@ -43,6 +43,23 @@ HostAgent ──send_message──> visualizer ──tools──> 生成 / 検�
 | `create_chart` | Chart.js config → QuickChart → PNG 保存（chartSpec も台帳に保持） |
 | `list_saved_media` | セッションの保存済みメディア一覧（最終マニフェスト作成用） |
 
+## インストール
+
+```swift
+// Package.swift
+dependencies: [
+    .package(url: "https://github.com/no-problem-dev/swift-media-agent.git", from: "0.1.0")
+]
+```
+
+```swift
+.target(name: "YourTarget", dependencies: [
+    .product(name: "MediaAgent", package: "swift-media-agent"),      // エージェント定義（prompt / AgentCard / ToolSet）
+    .product(name: "MediaAgentTools", package: "swift-media-agent"), // LLM ツール群 + プロバイダー
+    .product(name: "MediaStore", package: "swift-media-agent"),      // セッション別ファイルストア
+])
+```
+
 ## 使い方
 
 ```swift
