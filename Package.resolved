@@ -1,13 +1,13 @@
 {
-  "originHash" : "8c6af2c6d0a09e49e62a18c718dc5a066ae139aa4ef3af190124af0769d7903c",
+  "originHash" : "2214a49c4caa06e66773f6b86cef34940e9b147b79db9fb02cf2a288522c5432",
   "pins" : [
     {
       "identity" : "swift-a2a",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/no-problem-dev/swift-a2a.git",
       "state" : {
-        "revision" : "c9675f1d165cedbb35fe82d290be56592125cf55",
-        "version" : "0.5.0"
+        "revision" : "5982c121e3cb7505d64229dcfa0d2d7f72fbcb13",
+        "version" : "0.7.0"
       }
     },
     {

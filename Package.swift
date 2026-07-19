@@ -14,7 +14,7 @@ let package = Package(
         // Tool プロトコル・JSONSchema・SystemPrompt（プロバイダー非依存の契約層）
         .package(url: "https://github.com/no-problem-dev/swift-llm-client.git", from: "3.4.0"),
         // AgentCard（A2A エージェントとしての自己記述）
-        .package(url: "https://github.com/no-problem-dev/swift-a2a.git", from: "0.5.0"),
+        .package(url: "https://github.com/no-problem-dev/swift-a2a.git", from: "0.7.0"),
     ],
     targets: [
         // Layer 0: セッションスコープのメディア成果物ストア + 検証（UI / LLM / ネットワーク非依存）
