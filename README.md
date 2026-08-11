@@ -47,7 +47,7 @@ HostAgent ──send_message──> visualizer ──tools──> generate / sea
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/no-problem-dev/swift-media-agent.git", from: "0.1.0")
+    .package(url: "https://github.com/no-problem-dev/swift-media-agent.git", .upToNextMinor(from: "0.1.0"))
 ]
 ```
 
