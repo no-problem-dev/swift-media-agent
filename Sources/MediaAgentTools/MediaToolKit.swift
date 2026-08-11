@@ -3,13 +3,16 @@ import LLMClient
 import LLMTool
 import MediaStore
 
-/// visualizer エージェントに渡すメディア準備ツール一式。
+/// The media-preparation tools handed to the visualizer agent.
 ///
-/// 検証パイプライン（gpt-researcher / ADK ArtifactService の知見を踏襲）:
-/// 1. 取得・生成したバイトはマジックバイト + ImageIO 寸法で必ず検証する
-/// 2. 検証を通ったバイトはセッションディレクトリへ保存（リホスト）する —
-///    リモート URL は hotlink 防止・署名期限切れ・将来の 404 で死ぬため信用しない
-/// 3. 同一内容は SHA-256 で重複排除、結果はすべて manifest.json に台帳化する
+/// Every tool that produces bytes runs the same three steps:
+/// 1. Validate — magic bytes plus an ImageIO dimension read. Nothing unvalidated reaches disk.
+/// 2. Rehost — write the bytes into the session directory. A remote URL is never the deliverable:
+///    hotlink protection, expiring signatures and eventual 404s all kill it.
+/// 3. Record — deduplicate by SHA-256, append to `manifest.json`, and return a `media://` URL.
+///
+/// Which tools exist depends on what was injected. A provider left `nil` removes its tools with no
+/// error anywhere, so consult `availableToolIDs` to tell "switched off" from "not configured".
 public struct MediaToolKit: Sendable {
     public let store: MediaSessionStore
     let imageGenerator: (any ImageGenerating)?
@@ -20,7 +23,9 @@ public struct MediaToolKit: Sendable {
     let oEmbed: YouTubeOEmbed
     let http: any MediaHTTPClient
     let policy: ImageValidationPolicy
-    /// 生成画像・チャートはサイズが保証されるため寸法フィルタを通さない
+    /// The caller's policy with the dimension filters opened up (`minShortSide` 1,
+    /// `maxAspectRatio` 100), applied to bytes this package produced itself — generated images,
+    /// chart renders, video thumbnails — where the size is already known to be deliberate.
     let trustedPolicy: ImageValidationPolicy
 
     public init(
@@ -49,9 +54,13 @@ public struct MediaToolKit: Sendable {
         self.trustedPolicy = trusted
     }
 
-    /// Gemini 画像生成 + Serper 検索の標準構成。
-    /// `onDeviceImageGenerator` はデバイスが対応する場合のみ渡す —
-    /// 非対応なら nil にしてツール自体を編成から外す（実行時失敗はツールがエラーを返す）。
+    /// Stock configuration: Gemini for image generation, Serper for both image and video search.
+    ///
+    /// An empty or absent `serperAPIKey` leaves both search tools out of the toolkit. `geminiAPIKey`
+    /// gets no such check — the generation tool is installed regardless and an unusable key surfaces
+    /// as an HTTP error on the first call. Pass `onDeviceImageGenerator` only when
+    /// `PlaygroundImageGenerator.isSupported` is true; leaving it `nil` drops `generate_ui_image`
+    /// instead of offering the model a tool that cannot run.
     public static func gemini(
         store: MediaSessionStore,
         geminiAPIKey: String,
@@ -72,18 +81,20 @@ public struct MediaToolKit: Sendable {
         )
     }
 
-    /// 構成済みプロバイダすべてが提供するツール一式（全 ID が有効）。
+    /// Every tool the configured providers can supply.
     ///
-    /// 特定ツールを除外したい場合は `tools(enabled:)` を使う。
+    /// Equivalent to `tools(enabled: MediaToolID.allTools)`; call that directly to leave tools out.
     public var tools: [any Tool] {
         tools(enabled: MediaToolID.allTools)
     }
 
-    /// 構成済みプロバイダから提供可能なツール ID（`tools(enabled:)` の上限）。
-    /// ホスト UI はこれで「キー未設定で使えないツール」を判別できる。
+    /// Upper bound on what `tools(enabled:)` can return, given what was injected.
+    ///
+    /// A host UI uses this to distinguish a tool the user turned off from one that is unavailable
+    /// because its API key or device support is missing.
     public var availableToolIDs: Set<MediaToolID> {
         var ids = MediaToolID.coreTools
-        ids.insert(.createChart) // renderer は常に構成される
+        ids.insert(.createChart) // the chart renderer always has a default, so it is never missing
         if imageGenerator != nil { ids.insert(.generateImage) }
         if onDeviceImageGenerator != nil { ids.insert(.generateUIImage) }
         if imageSearch != nil { ids.insert(.searchImages) }
@@ -91,10 +102,12 @@ public struct MediaToolKit: Sendable {
         return ids
     }
 
-    /// enabled で選別したツール一式。コアツールは常に含まれ、
-    /// プロバイダ未構成のツールは enabled に含めても落ちる。
-    /// ツール説明内のクロス参照（generate_image ↔ search_images ↔ create_chart）も
-    /// 同じセットで剪定されるため、存在しないツールへの誘導が説明文に残らない。
+    /// Builds the toolkit for one `enabled` set: core tools are always in, and tools whose provider
+    /// was never injected are always out.
+    ///
+    /// Tool descriptions are pruned against the same set, so the cross-references between
+    /// `generate_image`, `generate_ui_image`, `search_images` and `create_chart` never point the
+    /// model at a tool that is not in front of it.
     public func tools(enabled: Set<MediaToolID>) -> [any Tool] {
         let effective = availableToolIDs.intersection(enabled.union(MediaToolID.coreTools))
         var tools: [any Tool] = []
@@ -109,11 +122,12 @@ public struct MediaToolKit: Sendable {
         return tools
     }
 
-    // MARK: - 共通の保存結果
+    // MARK: - Shared save result
 
     struct SavedAsset: Encodable {
-        /// 安定参照（`media://<sessionID>/<filename>`）。絶対 file:// パスは
-        /// コンテナ UUID 依存でアーカイブ復元後に死ぬため、LLM へは渡さない。
+        /// Stable `media://<sessionID>/<filename>` reference. Absolute `file://` paths are withheld
+        /// from the model deliberately: they embed the container UUID and stop resolving once an
+        /// archive is restored onto a different container.
         let mediaUrl: String
         let filename: String
         let kind: String
@@ -145,7 +159,7 @@ public struct MediaToolKit: Sendable {
         let generator = imageGenerator!
         let store = store
         let policy = trustedPolicy
-        // 「代わりにこれを使え」の誘導は同伴するツールにだけ向ける。
+        // Only redirect to tools that are actually present in this configuration.
         let redirects = [
             peers.contains(.searchImages) ? "search_images" : nil,
             peers.contains(.createChart) ? "create_chart" : nil,
@@ -153,7 +167,7 @@ public struct MediaToolKit: Sendable {
         let prohibition = redirects.isEmpty
             ? "Do NOT use for real people, products, places, or data charts."
             : "Do NOT use for real people, products, places, or data charts (use \(redirects.joined(separator: " / ")) instead)."
-        // オンデバイス生成が同伴する構成では、装飾用途をそちらへ誘導する。
+        // Where on-device generation is available, steer decorative work to it: free and local.
         let decorationSteer = peers.contains(.generateUIImage)
             ? " For purely decorative UI imagery where stylized output is fine, prefer generate_ui_image (free, on-device)."
             : ""
@@ -210,7 +224,7 @@ public struct MediaToolKit: Sendable {
         let generator = onDeviceImageGenerator!
         let store = store
         let policy = trustedPolicy
-        // 高品質生成が同伴する構成でだけ「忠実度が要るならそちら」の対比を載せる。
+        // Only contrast against the cloud generator when it is actually available.
         let contrast = peers.contains(.generateImage)
             ? " For high-quality concept art or anything needing fidelity, use generate_image instead."
             : ""
@@ -307,7 +321,7 @@ public struct MediaToolKit: Sendable {
         let store = store
         let http = http
         let policy = policy
-        // 検証失敗時のフォールバック先・URL の出どころの言及も同伴ツールに合わせる。
+        // Both the fallback advice and the account of where URLs come from track the configuration.
         let failureFallback = peers.contains(.generateImage)
             ? "If validation fails, try another candidate or fall back to generate_image."
             : "If validation fails, try another candidate."
@@ -459,7 +473,7 @@ public struct MediaToolKit: Sendable {
         let store = store
         let renderer = chartRenderer
         let policy = trustedPolicy
-        // generate_image が同伴しない構成では対比の言及を落とす。
+        // Drop the "never generate_image" contrast when that tool is not in this configuration.
         let usage = peers.contains(.generateImage)
             ? "Use this — never generate_image — whenever exact numeric data must be visualized."
             : "Use this whenever exact numeric data must be visualized."

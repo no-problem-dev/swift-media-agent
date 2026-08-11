@@ -1,9 +1,11 @@
 import Foundation
 import ImageIO
 
-/// マジックバイトで判定した画像フォーマット。
-/// Content-Type ヘッダは偽装・誤設定が多い（エラーページが 200 + text/html で返る等）ため、
-/// 保存可否は必ずバイト列で判定する。
+/// Format identified by sniffing the leading magic bytes of a byte stream.
+///
+/// Never taken from the `Content-Type` header: servers misreport it routinely — an error page
+/// commonly arrives as HTTP 200 with `text/html` — so whether bytes are worth saving is decided
+/// from the bytes alone.
 public enum ImageByteFormat: String, Sendable, CaseIterable {
     case png
     case jpeg
@@ -32,15 +34,16 @@ public enum ImageByteFormat: String, Sendable, CaseIterable {
     }
 }
 
-/// 画像バイト列の検証ポリシー。
+/// Thresholds deciding whether bytes are worth keeping, tuned to reject tracking pixels,
+/// icons and spacer banners rather than to judge image quality.
 public struct ImageValidationPolicy: Sendable {
-    /// 短辺の最小ピクセル数（アイコン・トラッカー画像の除外）
+    /// Minimum pixels on the shorter side — the bar that excludes icons and tracking pixels.
     public var minShortSide: Int
-    /// 長辺/短辺 の最大比（バナー・スペーサーの除外）
+    /// Largest tolerated long-side to short-side ratio, which is what excludes banners and spacers.
     public var maxAspectRatio: Double
-    /// 最大バイト数
+    /// Size ceiling, checked before anything is sniffed or decoded.
     public var maxByteCount: Int
-    /// 受け入れるフォーマット
+    /// Formats accepted after sniffing; bytes outside this set are rejected even though they decode.
     public var allowedFormats: Set<ImageByteFormat>
 
     public init(
@@ -58,19 +61,21 @@ public struct ImageValidationPolicy: Sendable {
     public static let `default` = ImageValidationPolicy()
 }
 
-/// 検証を通過した画像の情報。
+/// What inspection established about bytes that passed. Callers take the file extension
+/// and MIME type for the saved file from `format`.
 public struct ValidatedImage: Sendable, Equatable {
     public let format: ImageByteFormat
     public let width: Int
     public let height: Int
 }
 
-/// `ImageDataInspector.validate(_:policy:)` が検証失敗時にスローするエラー。
+/// Why `ImageDataInspector.validate(_:policy:)` refused a byte stream.
 ///
-/// `bodyPrefix` などの連想値には診断用の文脈情報が格納されるため、
-/// ログや UI のフォールバックメッセージ生成に利用できる。
+/// Associated values carry the diagnostic context — the offending dimensions, the actual byte
+/// count, the first 64 bytes of a non-image body — so a log line or fallback message can name what
+/// was wrong. Raised inside a tool call, the `errorDescription` is what the model reads back.
 public enum ImageValidationError: Error, Sendable, Equatable, LocalizedError {
-    /// 画像のマジックバイトではない（HTML エラーページ等）
+    /// The leading bytes match no known image format, typically an HTML error page served with a 200 status.
     case notAnImage(bodyPrefix: String)
     case unsupportedFormat(ImageByteFormat)
     case undecodable
@@ -96,10 +101,12 @@ public enum ImageValidationError: Error, Sendable, Equatable, LocalizedError {
     }
 }
 
-/// 画像バイト列の判定・検証。純関数のみでネットワークに触れない。
+/// Byte-level inspection of image data: no network, no filesystem, no shared state.
 public enum ImageDataInspector {
 
-    /// マジックバイトからフォーマットを判定する。
+    /// Identifies the format from the leading magic bytes, without decoding the image.
+    ///
+    /// Returns `nil` for unrecognized data and for any stream shorter than 12 bytes.
     public static func sniffFormat(_ data: Data) -> ImageByteFormat? {
         guard data.count >= 12 else { return nil }
         let bytes = [UInt8](data.prefix(12))
@@ -110,7 +117,7 @@ public enum ImageDataInspector {
         if bytes[0...3] == [0x52, 0x49, 0x46, 0x46], bytes[8...11] == [0x57, 0x45, 0x42, 0x50] {
             return .webp
         }
-        // HEIC/HEIF: offset 4 から "ftyp" + heic 系ブランド
+        // HEIC/HEIF: "ftyp" at offset 4, followed by an heic-family brand
         if bytes[4...7] == [0x66, 0x74, 0x79, 0x70] {
             let brand = String(bytes: bytes[8...11], encoding: .ascii) ?? ""
             if ["heic", "heix", "hevc", "mif1", "msf1"].contains(brand) { return .heic }
@@ -118,7 +125,9 @@ public enum ImageDataInspector {
         return nil
     }
 
-    /// ImageIO でピクセル寸法を取得する（フルデコードしない）。
+    /// Reads pixel dimensions from the image header through ImageIO, without decoding or caching pixels.
+    ///
+    /// Returns `nil` when the bytes cannot be read as an image at all.
     public static func dimensions(of data: Data) -> (width: Int, height: Int)? {
         let options = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithData(data as CFData, options),
@@ -129,7 +138,11 @@ public enum ImageDataInspector {
         return (width, height)
     }
 
-    /// ポリシーに従って画像バイト列を検証する。
+    /// Applies every policy check and reports the format and dimensions of bytes that pass.
+    ///
+    /// Checks run cheapest first: byte count, magic-byte sniffing, the allowed-format set, and only
+    /// then an ImageIO header read for the size and aspect-ratio limits. The first failing check
+    /// throws and nothing beyond it is examined, so the error names one reason, not all of them.
     public static func validate(
         _ data: Data,
         policy: ImageValidationPolicy = .default

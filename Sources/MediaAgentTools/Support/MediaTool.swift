@@ -2,7 +2,11 @@ import Foundation
 import LLMClient
 import LLMTool
 
-/// クロージャベースの Tool 実装。DI が重いツール（ストア・プロバイダー注入）向け。
+/// Closure-backed `Tool`, for handlers that capture their dependencies — store, providers, HTTP
+/// client — rather than receiving them as arguments.
+///
+/// `execute(with:)` never propagates an error: a throwing handler becomes a tool error the model
+/// reads, so one failed asset does not abort the run.
 struct MediaTool: Tool {
     let toolName: String
     let toolDescription: String
@@ -25,7 +29,8 @@ struct MediaTool: Tool {
         do {
             return try await handler(argumentsData)
         } catch {
-            // 失敗は LLM へ返して別候補・別手段（生成へのフォールバック等）を促す
+            // Hand failures back to the model so it can try another candidate or another tool
+            // (falling back to generation, for instance) instead of the run ending here.
             return .error(errorMessage(error))
         }
     }
@@ -51,7 +56,8 @@ enum ToolArgumentsDecoder {
 }
 
 extension ToolResult {
-    /// snake_case キーで JSON 結果を作成（ツール引数のキー規約と揃える）。
+    /// Encodes a result as JSON with snake_case keys, matching the convention the tool schemas
+    /// declare for arguments so the model sees one naming style in both directions.
     static func encodedSnakeCase<T: Encodable>(_ value: T) throws -> ToolResult {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys

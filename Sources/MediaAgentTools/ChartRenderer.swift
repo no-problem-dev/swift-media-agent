@@ -1,17 +1,17 @@
 import Foundation
 
-/// チャート仕様（Chart.js config JSON）を画像にレンダリングするシーム。
+/// Seam that turns a declarative chart specification into an image.
 ///
-/// データの数値正確性が要るチャートを画像生成 AI に描かせるのは非推奨
-/// （数値とバーの対応が保証されない）ため、宣言仕様 → 決定論的レンダリングを使う。
-/// 仕様 JSON 自体も manifest に保持し、将来のネイティブ（Swift Charts）描画へ移行可能にする。
+/// Charts go through deterministic rendering rather than an image model because a generated picture
+/// gives no guarantee that a bar matches its number. The specification itself is kept in the ledger,
+/// so the same chart can later be redrawn natively with Swift Charts.
 public protocol ChartRendering: Sendable {
-    /// Chart.js v4 設定 JSON から画像をレンダリングして PNG バイト列を返す。
+    /// Renders a Chart.js v4 configuration and returns the result as PNG bytes.
     ///
     /// - Parameters:
-    ///   - chartConfigJSON: Chart.js v4 形式の JSON 文字列
-    ///   - width: チャートの幅（ポイント）
-    ///   - height: チャートの高さ（ポイント）
+    ///   - chartConfigJSON: Chart.js v4 configuration as a JSON string.
+    ///   - width: Chart width in points.
+    ///   - height: Chart height in points.
     func render(chartConfigJSON: String, width: Int, height: Int) async throws -> Data
 }
 
@@ -25,7 +25,10 @@ public enum ChartRenderError: Error, Sendable, LocalizedError {
     }
 }
 
-/// QuickChart.io（Chart.js 互換、OSS・セルフホスト可）によるレンダリング。
+/// Rendering through QuickChart.io, which is Chart.js-compatible, open source and self-hostable —
+/// point `endpoint` at your own instance to keep chart data off a third party.
+///
+/// Malformed JSON is rejected locally before any request goes out.
 public struct QuickChartRenderer: ChartRendering {
     let http: any MediaHTTPClient
     let endpoint: URL

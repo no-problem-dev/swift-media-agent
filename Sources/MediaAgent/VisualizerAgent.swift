@@ -5,22 +5,29 @@ import LLMTool
 import MediaAgentTools
 import MediaStore
 
-/// visualizer エージェントの定義一式。
+/// Everything that defines the visualizer agent, and none of the machinery that runs it.
 ///
-/// 実行系（LLM クライアント・A2A executor）には依存せず、
-/// 「役割（system prompt）・自己記述（AgentCard）・道具（ToolSet）」だけを提供する。
-/// ホスト側は他のワーカーと同じ手順（LLMAgentExecutor + A2AClient.inProcess 等）で実体化する。
+/// Supplies the role (`systemPrompt(tools:language:)`), the self-description
+/// (`agentCard(interfaceURL:protocolBinding:tools:)`) and the tools (`toolSet(_:)`), while
+/// depending on no LLM client and no A2A executor. A host instantiates it the same way it
+/// instantiates any other worker, for instance `LLMAgentExecutor` plus `A2AClient.inProcess`.
 public enum VisualizerAgent {
     public static let name = "visualizer"
     public static let version = "0.1.0"
 
-    /// オーケストレータが委譲判断に使う説明（全ツール構成のデフォルト）。
-    /// WHAT（被写体・データ・UI 上の役割）を渡させ、HOW（ツール選択）は委譲先に残す。
+    /// Delegation blurb an orchestrator reads, assuming a fully equipped configuration.
+    ///
+    /// Worded to make callers state what each asset should show and its role in the UI, leaving the
+    /// choice of tool to this agent.
     public static var agentDescription: String { agentDescription() }
 
-    /// オーケストレータが委譲判断に使う説明を、有効ツール構成から組み立てる。
-    /// `MediaToolKit.tools(enabled:)` / `systemPrompt(tools:)` と同じセットを渡すこと —
-    /// ホストが「できる」と聞かされた能力と実際の道具が一致する。
+    /// Builds the delegation blurb from the tools that are actually enabled.
+    ///
+    /// Pass the same set given to `MediaToolKit.tools(enabled:)` and `systemPrompt(tools:language:)`.
+    /// Otherwise an orchestrator delegates work on the strength of a capability this agent has not
+    /// been equipped to perform.
+    ///
+    /// - Parameter enabled: Tools the agent may use, which decides which capabilities are advertised.
     public static func agentDescription(tools enabled: Set<MediaToolID> = MediaToolID.allTools) -> String {
         var capabilities: [String] = []
         if enabled.contains(.searchImages) { capabilities.append("real web photos and figures") }
@@ -31,7 +38,7 @@ public enum VisualizerAgent {
         let sourcing = capabilities.isEmpty
             ? "validated copies of the asset URLs you provide"
             : capabilities.joined(separator: ", ")
-        // 「検索を生成より優先」は両方あるときだけ意味を持つ。
+        // "Prefer real assets over generated ones" only means something when both are available.
         let preference = enabled.contains(.searchImages) && enabled.contains(.generateImage)
             ? ", preferring real web assets over generation"
             : ""
@@ -43,17 +50,22 @@ public enum VisualizerAgent {
         """
     }
 
-    /// visualizer の system prompt を有効ツール構成から組み立てる。
+    /// Builds the system prompt from the tools that are actually enabled.
     ///
-    /// ルーティング方針は Manus / Genspark の収束点を踏襲:
-    /// 実在物 → 検索、概念図・挿絵 → 生成、数値データ → チャート（数値の捏造禁止）。
-    /// ルーティング指示はツール ID 単位の断片で、`MediaToolKit.tools(enabled:)` と同じ
-    /// セットを渡せば「持っていないツールへの言及」がプロンプトに残らない。
+    /// The routing rule it encodes: subjects that exist in the world go to search, visuals that do
+    /// not exist yet go to generation, and numeric data goes to a chart with no invented values.
+    /// Routing lines are emitted per tool ID, so passing the same set given to
+    /// `MediaToolKit.tools(enabled:)` leaves no mention of a tool the model was not given.
+    ///
+    /// - Parameters:
+    ///   - enabled: Tools the agent may use; must match the set the toolkit was built with.
+    ///   - language: Language for the prose of the reply. Media URLs and alt text are exempt and
+    ///     may come back in English.
     public static func systemPrompt(
         tools enabled: Set<MediaToolID> = MediaToolID.allTools,
         language: String = "Japanese"
     ) -> SystemPrompt {
-        // 被写体 → ツールのルーティング表。有効なツールの行だけが並ぶ。
+        // Subject-to-tool routing table; only lines for enabled tools are emitted.
         var routes: [String] = []
         if enabled.contains(.searchImages) {
             routes.append("anything plausibly published on the web (people, products, places, screenshots, official diagrams and figures from docs or articles) -> search_images then save_image_url")
@@ -71,7 +83,8 @@ public enum VisualizerAgent {
             routes.append("talks/demos -> search_videos then save_video_reference")
         }
         let routing = routes.isEmpty
-            // 探索系が全て無効でも save 系は残る — 渡された URL の検証・保存役として動く。
+            // With every discovery tool off the save tools remain, so the agent still works as the
+            // validator and store for URLs it is handed.
             ? "You have no search or generation tools in this configuration. Validate and save the asset URLs given in the task input with save_image_url / save_video_reference."
             : "Choose tools by what each asset depicts, not by how the request is phrased."
                 + (enabled.contains(.searchImages) ? " Prefer what already exists:" : "")
@@ -108,8 +121,11 @@ public enum VisualizerAgent {
         }
     }
 
-    /// A2A AgentCard。`interfaceURL` は配置形態（in-process / HTTP）に応じて呼び出し側が決める。
-    /// スキル一覧も有効ツール構成から導出する（説明・プロンプト・ツールと同じセット）。
+    /// A2A card advertising the agent, its skill list derived from the enabled tools.
+    ///
+    /// `interfaceURL` and `protocolBinding` describe how this particular deployment is reached —
+    /// in-process or over HTTP — and are the caller's to decide. Pass the same `tools` set used
+    /// everywhere else so the advertised skills match what the agent can actually do.
     public static func agentCard(
         interfaceURL: String,
         protocolBinding: String = "InProcess",
@@ -166,10 +182,12 @@ public enum VisualizerAgent {
         )
     }
 
-    /// `MediaToolKit` のツール一式を `ToolSet` としてラップする。
+    /// Wraps a toolkit's tools as a `ToolSet` for handing to an `LLMAgentExecutor`.
     ///
-    /// `LLMAgentExecutor` に渡す際のアダプター。`systemPrompt(tools:)` と同じ `enabled` セットで
-    /// 構築した `MediaToolKit.tools` を内包するため、プロンプトとツールの整合が保たれる。
+    /// - Important: This takes `MediaToolKit.tools`, which is every tool the configured providers
+    ///   can supply, and has no way to observe a narrower selection. A configuration that disables
+    ///   tools must build its `ToolSet` from `MediaToolKit.tools(enabled:)` with the same set given
+    ///   to `systemPrompt(tools:language:)`, or the model will hold tools the prompt never mentions.
     public static func toolSet(_ toolKit: MediaToolKit) -> ToolSet {
         ToolSet(tools: toolKit.tools)
     }

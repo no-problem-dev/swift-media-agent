@@ -6,18 +6,19 @@ import ImagePlayground
 import UniformTypeIdentifiers
 #endif
 
-/// オンデバイス画像生成のシーム。テストではモックに差し替える。
+/// Seam for on-device image generation, substituted with a mock in tests.
 ///
-/// クラウド生成（`ImageGenerating`）とは役割を分ける:
-/// クラウド = 高品質なコンセプトアート・図解、オンデバイス = UI 装飾用の軽量画像。
+/// Kept apart from `ImageGenerating` because the two are not interchangeable: the cloud model is
+/// for concept art and diagrams that need fidelity, this one for lightweight decorative imagery
+/// where a stylized result is acceptable.
 public protocol OnDeviceImageGenerating: Sendable {
-    /// プロンプトとスタイル名から画像を 1 枚生成し、PNG バイト列を返す。
-    ///
-    /// デバイスが非対応またはモデル未ダウンロードの場合は `OnDeviceImageError.notSupported` をスロー。
+    /// Generates a single image and returns it as PNG bytes.
     ///
     /// - Parameters:
-    ///   - prompt: 英語の短いプロンプト（被写体・雰囲気・色合い）
-    ///   - style: スタイル名（`"animation"`, `"illustration"`, `"sketch"` のいずれか）
+    ///   - prompt: Short English prompt covering subject, mood and colors.
+    ///   - style: One of `"animation"`, `"illustration"` or `"sketch"`.
+    /// - Throws: `OnDeviceImageError.notSupported` when the device lacks Apple Intelligence or has
+    ///   not downloaded the image model.
     func generateImage(prompt: String, style: String) async throws -> Data
 }
 
@@ -44,17 +45,21 @@ public enum OnDeviceImageError: Error, Sendable, LocalizedError {
     }
 }
 
-/// Apple Image Playground（`ImageCreator`）によるオンデバイス画像生成。
+/// On-device generation through Apple Image Playground's `ImageCreator`.
 ///
-/// 無料・API キー不要・オフライン動作。ただしスタイルは
-/// animation / illustration / sketch のみで、写実・正確なテキスト描画・図解には不向き。
-/// UI 装飾用途（背景・サムネイル・アクセント挿絵）専用として扱う。
+/// Free, offline and needs no API key, but confined to the animation, illustration and sketch
+/// styles: no photorealism, no legible text, no accurate diagrams. Treat it as a source of UI
+/// decoration — backdrops, thumbnails, spot illustrations — and nothing else.
 public struct PlaygroundImageGenerator: OnDeviceImageGenerating {
-    /// ツールスキーマの enum に使うスタイル名（ImagePlaygroundStyle と 1:1）。
+    /// Style names used verbatim as the tool schema's enum, one per `ImagePlaygroundStyle` case.
     public static let styleNames = ["animation", "illustration", "sketch"]
 
-    /// ツールセット構築時のゲート。false ならツール自体を編成に入れない。
-    /// OS バージョンに加え、Apple Intelligence の有効化状態・対応ハードウェアを反映する。
+    /// Gate to check before building the toolkit: when this is false the host passes no generator
+    /// and `generate_ui_image` is left out entirely.
+    ///
+    /// Covers more than the OS version — it also reflects whether Apple Intelligence is enabled and
+    /// whether the hardware supports it. Passing the gate is still no guarantee, since the model can
+    /// be removed or disabled between this check and the call.
     @MainActor
     public static var isSupported: Bool {
         #if canImport(ImagePlayground)
@@ -85,7 +90,8 @@ public struct PlaygroundImageGenerator: OnDeviceImageGenerating {
         do {
             creator = try await ImageCreator()
         } catch {
-            // isSupported を通っていても、モデル削除・設定変更等で実行時に落ちうる
+            // Clearing isSupported does not prevent this: the model can be deleted or the setting
+            // changed between the gate and this call.
             throw OnDeviceImageError.generationFailed(String(describing: error))
         }
         guard creator.availableStyles.contains(playgroundStyle) else {

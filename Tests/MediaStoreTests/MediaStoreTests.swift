@@ -74,7 +74,7 @@ func makeTempRoot() -> URL {
     }
 
     @Test func rejectsExtremeAspectRatio() {
-        // 短辺 200 は満たすが 8:1 のバナー形状
+        // Clears the 200px short-side floor, but the 8:1 shape is banner-like.
         #expect(throws: ImageValidationError.extremeAspectRatio(width: 1600, height: 200, maxRatio: 4.0)) {
             try ImageDataInspector.validate(makePNG(width: 1600, height: 200))
         }
@@ -155,7 +155,8 @@ func makeTempRoot() -> URL {
             png, filenameHint: "a", fileExtension: "png", kind: .fetchedImage, mimeType: "image/png"
         )
 
-        // 同じセッション ID で再オープン → 台帳復元 + 内容ハッシュも復元（重複保存しない）
+        // Reopening the same session ID restores the ledger and the content hashes with it, so
+        // these bytes are recognized and not written a second time.
         let reopened = try MediaSessionStore(rootDirectory: root, sessionID: "s1")
         #expect(await reopened.allItems().count == 1)
         let again = try await reopened.save(
@@ -172,7 +173,7 @@ func makeTempRoot() -> URL {
     }
 
     @Test func stableURLRoundTripsToFileURL() async throws {
-        // sessionID は UUID 大文字 — URL host の大小文字正規化に巻き込まれないこと
+        // Uppercase UUID session ID: the round trip must survive URL host case normalization.
         let sessionID = "ABC123DE-0000-4000-8000-1234567890AB"
         let root = makeTempRoot()
         let store = try MediaSessionStore(rootDirectory: root, sessionID: sessionID)

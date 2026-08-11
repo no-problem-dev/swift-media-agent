@@ -1,22 +1,23 @@
 import Foundation
 
-/// 保存されたメディアの種別。
+/// What a stored file is, which also determines which of `MediaItem`'s optional fields are filled in.
 public enum MediaKind: String, Sendable, Codable, CaseIterable {
-    /// AI が生成した画像
+    /// Produced by a cloud or on-device image model; carries `prompt`.
     case generatedImage
-    /// Web から取得・検証した画像
+    /// Downloaded from the web and validated before it reached disk; carries `sourceURL` and `pageURL`.
     case fetchedImage
-    /// データ駆動でレンダリングしたチャート画像
+    /// Rendered from a declarative chart configuration; carries `chartSpec`.
     case chart
-    /// 動画参照のサムネイル画像（動画本体は保存しない）
+    /// Stands in for a video. The video itself is never downloaded — only `videoURL` and `videoTitle` are kept.
     case videoThumbnail
 }
 
-/// セッションディレクトリに保存された 1 メディアのレコード。
+/// One media file as recorded in a session's ledger, stored alongside the bytes themselves.
 ///
-/// ファイル本体とは別に manifest.json に永続化される。iOS ではアプリコンテナの
-/// 絶対パスが起動ごとに変わりうるため、レコードは `filename` のみを持ち、
-/// 絶対 URL は `MediaSessionStore.fileURL(for:)` で都度解決する。
+/// Deliberately holds `filename` and never an absolute path: on iOS the app container path changes
+/// between launches, so a stored absolute URL goes stale. Resolve the location on demand with
+/// `MediaSessionStore.fileURL(for:)`, or use `MediaSessionStore.stableURL(for:)` for a reference
+/// that can safely be persisted or handed to an LLM.
 public struct MediaItem: Sendable, Codable, Equatable, Identifiable {
     public let id: String
     public let kind: MediaKind
@@ -25,19 +26,19 @@ public struct MediaItem: Sendable, Codable, Equatable, Identifiable {
     public let byteCount: Int
     public let width: Int?
     public let height: Int?
-    /// 代替テキスト（アクセシビリティ + UI エージェントへの内容説明）
+    /// Alternative text, serving both accessibility and telling a downstream UI agent what the image shows.
     public let alt: String?
-    /// 取得元の画像 URL（fetchedImage）
+    /// Direct image URL the bytes came from. Set for `fetchedImage`.
     public let sourceURL: String?
-    /// 取得元のページ URL（出典表示・再取得用）
+    /// Page the image was found on, kept for attribution and reused as the `Referer` when re-fetching.
     public let pageURL: String?
-    /// 生成プロンプト（generatedImage）
+    /// Prompt the image was generated from. Set for `generatedImage`.
     public let prompt: String?
-    /// チャートの宣言仕様（Chart.js config JSON）。将来のネイティブ描画用に保持
+    /// Chart.js configuration the chart was rendered from, retained so it can be redrawn natively later.
     public let chartSpec: String?
-    /// 参照先の動画 URL（videoThumbnail）
+    /// Video this thumbnail links to. Set for `videoThumbnail`.
     public let videoURL: String?
-    /// 動画タイトル（videoThumbnail）
+    /// Title reported by oEmbed when the reference was saved. Set for `videoThumbnail`.
     public let videoTitle: String?
     public let createdAt: Date
 
@@ -76,7 +77,8 @@ public struct MediaItem: Sendable, Codable, Equatable, Identifiable {
     }
 }
 
-/// 1 セッション分のメディア成果物の台帳。
+/// Everything saved in one session, persisted as `manifest.json` beside the files
+/// and reloaded whenever a store reopens the same session ID.
 public struct MediaManifest: Sendable, Codable, Equatable {
     public let sessionID: String
     public var items: [MediaItem]

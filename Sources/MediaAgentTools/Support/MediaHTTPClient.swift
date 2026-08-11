@@ -1,12 +1,16 @@
 import Foundation
 
-/// メディア取得・API 呼び出しの HTTP シーム。テストではモックに差し替える。
+/// Seam for every outbound request this package makes — image downloads, generation and search
+/// APIs — so tests can substitute a mock without touching the network.
 public protocol MediaHTTPClient: Sendable {
-    /// URLRequest を送信し、ステータスコードに関わらず (Data, HTTPURLResponse) を返す。
+    /// Sends a request and returns the body and response whatever the status code.
+    ///
+    /// A non-2xx status is not an error at this level; callers that need one must check themselves.
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
 }
 
-/// メディア HTTP クライアントが返すエラー。
+/// Transport-level failure: a non-HTTP response, or a status outside 2xx carrying the first 300
+/// bytes of the body for diagnosis.
 public enum MediaHTTPError: Error, Sendable, LocalizedError {
     case invalidResponse
     case status(Int, bodyPrefix: String)
@@ -19,9 +23,11 @@ public enum MediaHTTPError: Error, Sendable, LocalizedError {
     }
 }
 
-/// `MediaHTTPClient` の URLSession ベースの標準実装。
+/// Default implementation backed by `URLSession`.
 ///
-/// `session` と `defaultTimeout` を注入してテストや特殊ネットワーク構成に対応できる。
+/// `defaultTimeout` is applied only to requests still carrying `URLRequest`'s own default of 60
+/// seconds. A request that deliberately asks for 60 is indistinguishable from one that never set a
+/// timeout, and gets overwritten too.
 public struct URLSessionMediaHTTPClient: MediaHTTPClient {
     public let session: URLSession
     public let defaultTimeout: TimeInterval
@@ -41,7 +47,7 @@ public struct URLSessionMediaHTTPClient: MediaHTTPClient {
 }
 
 extension MediaHTTPClient {
-    /// 2xx 以外をエラーにする送信。
+    /// Sends a request and throws `MediaHTTPError.status` unless the response is 2xx.
     func sendExpectingSuccess(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let (data, response) = try await send(request)
         guard (200..<300).contains(response.statusCode) else {
@@ -53,8 +59,10 @@ extension MediaHTTPClient {
 }
 
 enum BrowserHeaders {
-    /// hotlink 防止対策: 検証・取得時はブラウザ相当の UA と Referer を付ける。
-    /// それでも表示時に 403 になり得るため、バイトを保存（リホスト）するのが本筋。
+    /// Browser-like User-Agent which, paired with a Referer, gets past most hotlink protection.
+    ///
+    /// It is not a guarantee: the same URL can still answer 403 later, which is exactly why the
+    /// bytes are copied into the session directory rather than linked to.
     static let userAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
 

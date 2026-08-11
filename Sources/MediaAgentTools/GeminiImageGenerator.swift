@@ -1,13 +1,14 @@
 import Foundation
 
-/// 画像生成のシーム。テストではモックに差し替える。
+/// Seam for cloud image generation, substituted with a mock in tests.
 public protocol ImageGenerating: Sendable {
-    /// プロンプトから画像を生成し、画像バイト列（通常 PNG）の配列を返す。
+    /// Generates images from a prompt and returns their encoded bytes, usually PNG.
     ///
     /// - Parameters:
-    ///   - prompt: 英語の画像プロンプト（被写体・スタイル・構図を具体的に記述）
-    ///   - aspectRatio: アスペクト比（`"1:1"`, `"16:9"` 等）。`nil` で実装依存のデフォルト
-    ///   - count: 生成枚数
+    ///   - prompt: English prompt naming subject, style and composition. Vague prompts are the
+    ///     main source of unusable output.
+    ///   - aspectRatio: Ratio such as `"1:1"` or `"16:9"`. `nil` accepts the implementation's default.
+    ///   - count: How many images are wanted. An implementation may spend one request per image.
     func generateImages(prompt: String, aspectRatio: String?, count: Int) async throws -> [Data]
 }
 
@@ -23,20 +24,20 @@ public enum ImageGeneratorError: Error, Sendable, LocalizedError {
     }
 }
 
-/// Gemini API（generateContent + responseModalities）による画像生成。
+/// Image generation over the Gemini `generateContent` endpoint using `responseModalities`.
 ///
-/// NOTE: 本来は swift-llm-cloud の `GeminiClient+ImageGeneration` の責務だが、
-/// 公開版の `GeminiImageModel` が旧世代（Imagen 4 は 2026-06-24 シャットダウン、
-/// gemini-2.0-flash-exp は廃止済み）のみのため、現行モデルを使う最小実装を
-/// 自己完結で持つ。upstream のモデルカタログ更新後に差し替える。
+/// - Note: This duplicates ground that belongs to swift-llm-cloud's `GeminiClient+ImageGeneration`.
+///   The published `GeminiImageModel` there only reaches models that no longer exist — Imagen 4
+///   shut down on 2026-06-24 and `gemini-2.0-flash-exp` is retired — so a self-contained
+///   implementation is what keeps current models reachable.
 public struct GeminiImageGenerator: ImageGenerating {
-    /// 選択可能な画像生成モデルのカタログ（2026-06 時点の GA モデル）。
+    /// Selectable image models, generally available as of 2026-06.
     public enum Preset: String, Codable, Sendable, CaseIterable, Identifiable {
-        /// Nano Banana 2。高速・低コストの標準モデル
+        /// Nano Banana 2. Fast and cheap, and the default.
         case flashImage31 = "gemini-3.1-flash-image"
-        /// Nano Banana Pro。テキスト描画・図解・高解像度（〜4K）向き
+        /// Nano Banana Pro. Worth the cost when the image must carry legible text, a diagram, or up to 4K.
         case proImage3 = "gemini-3-pro-image"
-        /// 旧世代 Nano Banana（2026-10 シャットダウン予定）
+        /// Previous-generation Nano Banana, scheduled for shutdown in 2026-10.
         case flashImage25 = "gemini-2.5-flash-image"
 
         public static let `default`: Preset = .flashImage31
@@ -67,14 +68,15 @@ public struct GeminiImageGenerator: ImageGenerating {
     ) {
         self.apiKey = apiKey
         self.model = model
-        // 画像生成は数十秒かかりうる（特に Pro/高解像度）ためタイムアウトを長めに取る
+        // Generation can run for tens of seconds, Pro at high resolution especially, so this
+        // timeout is far longer than the rest of the package uses.
         self.http = http ?? URLSessionMediaHTTPClient(defaultTimeout: 180)
         self.baseURL = baseURL
     }
 
     public func generateImages(prompt: String, aspectRatio: String?, count: Int) async throws -> [Data] {
         var images: [Data] = []
-        for _ in 0..<max(1, count) {  // Gemini Image は 1 リクエスト 1 枚
+        for _ in 0..<max(1, count) {  // Gemini Image returns one image per request
             images.append(contentsOf: try await generateOnce(prompt: prompt, aspectRatio: aspectRatio))
         }
         guard !images.isEmpty else { throw ImageGeneratorError.emptyResponse }
@@ -85,8 +87,9 @@ public struct GeminiImageGenerator: ImageGenerating {
         do {
             return try await request(prompt: prompt, aspectRatio: aspectRatio)
         } catch let error as MediaHTTPError {
-            // imageConfig はリビジョン間でフィールド名が揺れている（imageConfig / responseFormat.image）。
-            // 未知フィールドの 400 はアスペクト指定なしで 1 回だけリトライする。
+            // The aspect-ratio field has moved between API revisions (imageConfig /
+            // responseFormat.image), so a 400 naming an unknown field is retried once without it
+            // rather than surfaced as a failure.
             if case .status(400, let body) = error, aspectRatio != nil,
                body.contains("imageConfig") || body.contains("Unknown name") {
                 return try await request(prompt: prompt, aspectRatio: nil)

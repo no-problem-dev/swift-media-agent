@@ -50,7 +50,7 @@ private func jsonObject(_ result: ToolResult) -> [String: Any] {
 
 // MARK: - Mock HTTP
 
-/// ルーティングテーブル式のモック。最初にマッチしたルートの応答を返す。
+/// Routing-table mock: the first matching route answers, and an unmatched request throws a 404.
 struct MockHTTPClient: MediaHTTPClient {
     struct Route: Sendable {
         let matches: @Sendable (URLRequest) -> Bool
@@ -255,16 +255,16 @@ extension MockHTTPClient.Route {
         let full = MediaToolKit.gemini(
             store: try makeStore(), geminiAPIKey: "k", serperAPIKey: "s"
         )
-        // 全部オフを指定してもコアツールは残る。
+        // Core tools survive an empty enabled set.
         #expect(full.tools(enabled: []).map(\.toolName) == [
             "save_image_url", "save_video_reference", "list_saved_media",
         ])
-        // 個別無効化: search 系だけ落とす。
+        // Selective disabling: drop only the search tools.
         let noSearch = MediaToolID.allTools.subtracting([.searchImages, .searchVideos])
         #expect(full.tools(enabled: noSearch).map(\.toolName) == [
             "generate_image", "save_image_url", "save_video_reference", "create_chart", "list_saved_media",
         ])
-        // プロバイダ未構成のツールは enabled に含めても提供されない。
+        // A tool whose provider was never injected stays out even when enabled names it.
         let bare = MediaToolKit(store: try makeStore(), http: MockHTTPClient(routes: []))
         #expect(bare.tools(enabled: MediaToolID.allTools).map(\.toolName) == [
             "save_image_url", "save_video_reference", "create_chart", "list_saved_media",
@@ -276,14 +276,14 @@ extension MockHTTPClient.Route {
         let full = MediaToolKit.gemini(
             store: try makeStore(), geminiAPIKey: "k", serperAPIKey: "s"
         )
-        // generate_image だけ残す → 説明から search_images / create_chart への誘導が消える。
+        // With only generate_image left, its description stops pointing at search_images and create_chart.
         let generateOnly = full.tools(enabled: MediaToolID.coreTools.union([.generateImage]))
         let generate = generateOnly.first { $0.toolName == "generate_image" }!
         #expect(!generate.toolDescription.contains("search_images"))
         #expect(!generate.toolDescription.contains("create_chart"))
         let save = generateOnly.first { $0.toolName == "save_image_url" }!
         #expect(save.toolDescription.contains("generate_image"))
-        // generate_image をオフ → save_image_url のフォールバック誘導が消える。
+        // Turning generate_image off removes the fallback advice from save_image_url.
         let noGenerate = full.tools(enabled: MediaToolID.allTools.subtracting([.generateImage]))
         let saveNoGen = noGenerate.first { $0.toolName == "save_image_url" }!
         #expect(!saveNoGen.toolDescription.contains("generate_image"))
@@ -291,9 +291,9 @@ extension MockHTTPClient.Route {
         #expect(!chart.toolDescription.contains("generate_image"))
     }
 
-    // MARK: - generate_ui_image（オンデバイス生成）
+    // MARK: - generate_ui_image (on-device generation)
 
-    /// data == nil で「実行時に生成不能」を再現する。
+    /// A `nil` payload stands in for a device where generation fails at call time.
     private struct StubOnDeviceGenerator: OnDeviceImageGenerating {
         var data: Data?
         func generateImage(prompt: String, style: String) async throws -> Data {
@@ -311,7 +311,7 @@ extension MockHTTPClient.Route {
             "generate_image", "generate_ui_image", "search_images", "save_image_url",
             "search_videos", "save_video_reference", "create_chart", "list_saved_media",
         ])
-        // 非対応デバイス（generator nil）ではツール自体が編成に入らない。
+        // On an unsupported device the generator is nil and the tool never enters the toolkit.
         let without = MediaToolKit.gemini(store: try makeStore(), geminiAPIKey: "k", serperAPIKey: "s")
         #expect(!without.tools.map(\.toolName).contains("generate_ui_image"))
         #expect(!without.availableToolIDs.contains(.generateUIImage))
@@ -346,7 +346,8 @@ extension MockHTTPClient.Route {
             http: MockHTTPClient(routes: [])
         )
 
-        // 構築時ゲートを通っても実行時に落ちたら、エラーが LLM へ返る（Gemini への自動フォールバックなし）。
+        // A failure after the build-time gate returns an error to the model; nothing silently falls
+        // back to Gemini.
         let result = try await tool(named: "generate_ui_image", in: kit).execute(with: args([
             "prompt": "x", "filename_hint": "x",
         ]))
@@ -361,12 +362,12 @@ extension MockHTTPClient.Route {
             store: try makeStore(), geminiAPIKey: "k",
             onDeviceImageGenerator: StubOnDeviceGenerator(data: Data())
         )
-        // 両方ある構成: 相互の使い分け誘導が載る。
+        // Both present: each description tells the model when to prefer the other.
         let generate = both.tools.first { $0.toolName == "generate_image" }!
         #expect(generate.toolDescription.contains("generate_ui_image"))
         let uiImage = both.tools.first { $0.toolName == "generate_ui_image" }!
         #expect(uiImage.toolDescription.contains("use generate_image instead"))
-        // generate_image をオフ → 対比の言及が消える。
+        // With generate_image off, the contrast drops out of the description.
         let uiAlone = both.tools(enabled: MediaToolID.allTools.subtracting([.generateImage]))
             .first { $0.toolName == "generate_ui_image" }!
         #expect(!uiAlone.toolDescription.contains("use generate_image instead"))
@@ -387,7 +388,7 @@ extension MockHTTPClient.Route {
 
         let payload = jsonObject(result)
         #expect(payload["filename"] as? String == "skyline.png")
-        // コンテナパス非依存の安定参照（media://<sessionID>/<filename>）であること
+        // The tool must hand back the container-independent media:// reference, not a file path.
         #expect((payload["media_url"] as? String)?.hasPrefix("media://") == true)
         #expect((payload["media_url"] as? String)?.hasSuffix("/skyline.png") == true)
         #expect(payload["width"] as? Int == 800)
@@ -397,7 +398,7 @@ extension MockHTTPClient.Route {
         #expect(items[0].kind == .fetchedImage)
         #expect(items[0].pageURL == "https://example.com/article")
 
-        // hotlink 対策ヘッダが付いていること
+        // The hotlink-protection headers must be on the outgoing request.
         let request = await http.recorder.requests.first
         #expect(request?.value(forHTTPHeaderField: "Referer") == "https://example.com/article")
         #expect(request?.value(forHTTPHeaderField: "User-Agent")?.contains("Mozilla") == true)
@@ -467,13 +468,13 @@ extension MockHTTPClient.Route {
         let kit = MediaToolKit(store: store, http: http)
         let chartTool = tool(named: "create_chart", in: kit)
 
-        // 不正な JSON は弾く
+        // Malformed JSON is rejected locally, before any request is made.
         let invalid = try await chartTool.execute(with: args([
             "title": "Bad", "chart_config": "{not json", "filename_hint": "bad",
         ]))
         #expect(invalid.isError)
 
-        // 正常系: 保存され chartSpec が台帳に残る
+        // Happy path: saved, with the chart spec retained in the ledger for later redrawing.
         let config = #"{"type":"bar","data":{"labels":["A","B"],"datasets":[{"label":"v","data":[1,2]}]}}"#
         let result = try await chartTool.execute(with: args([
             "title": "Sales by region", "chart_config": config, "filename_hint": "sales-chart",
@@ -548,7 +549,7 @@ extension MockHTTPClient.Route {
         ])
         #expect(card.capabilities.streaming == true)
 
-        // オンデバイス生成なしの構成ではスキルも消える。
+        // Without on-device generation the advertised skill disappears too.
         let withoutOnDevice = VisualizerAgent.agentCard(
             interfaceURL: "inprocess://visualizer",
             tools: MediaToolID.allTools.subtracting([.generateUIImage])

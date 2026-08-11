@@ -1,6 +1,7 @@
 import Foundation
 
-/// oEmbed で取得した動画メタデータ。oEmbed の成功自体が動画の存在検証を兼ねる（404 = 削除済み）。
+/// Metadata returned by YouTube's oEmbed endpoint. Obtaining it at all is the existence check: a
+/// removed or private video answers 404.
 public struct VideoEmbedInfo: Sendable, Equatable {
     public let title: String
     public let authorName: String?
@@ -19,7 +20,8 @@ public enum YouTubeOEmbedError: Error, Sendable, LocalizedError {
     }
 }
 
-/// YouTube の oEmbed 照会とサムネイル URL の導出。API キー不要。
+/// YouTube oEmbed lookups and thumbnail retrieval. Needs no API key, which is why
+/// `save_video_reference` works in every configuration.
 public struct YouTubeOEmbed: Sendable {
     let http: any MediaHTTPClient
 
@@ -27,7 +29,10 @@ public struct YouTubeOEmbed: Sendable {
         self.http = http
     }
 
-    /// watch?v= / youtu.be/ / shorts/ / embed/ 形式から動画 ID を抽出する。
+    /// Extracts the video ID from `watch?v=`, `youtu.be/`, `shorts/`, `embed/`, `v/` and `live/` URLs.
+    ///
+    /// Returns `nil` for non-YouTube hosts and for any ID containing more than letters, digits,
+    /// `-` and `_`, which is also what keeps a hostile URL out of the thumbnail path built from it.
     public static func videoID(from urlString: String) -> String? {
         guard let url = URL(string: urlString), let host = url.host?.lowercased() else { return nil }
         let id: String?
@@ -49,7 +54,10 @@ public struct YouTubeOEmbed: Sendable {
         return id
     }
 
-    /// 動画の存在を検証してメタデータを返す。
+    /// Confirms the video exists and returns its title and author.
+    ///
+    /// Every non-200 answer becomes `videoUnavailable`, transient server-side failures included, so
+    /// this failing is not proof the video is gone.
     public func fetchInfo(videoURL: String) async throws -> VideoEmbedInfo {
         guard Self.videoID(from: videoURL) != nil else {
             throw YouTubeOEmbedError.notAYouTubeURL(videoURL)
@@ -69,7 +77,12 @@ public struct YouTubeOEmbed: Sendable {
         return VideoEmbedInfo(title: body.title ?? "", authorName: body.author_name, thumbnailURL: body.thumbnail_url)
     }
 
-    /// サムネイルを取得する。maxresdefault は存在しない動画が多いので hqdefault（必ず存在）へフォールバック。
+    /// Downloads the best available thumbnail, trying `maxresdefault`, then `hqdefault`, then the
+    /// URL oEmbed reported.
+    ///
+    /// `maxresdefault` is absent for a large share of videos while `hqdefault` always exists, so the
+    /// second candidate is usually the one that succeeds. Only the last failure is thrown; earlier
+    /// ones are discarded, so the error may not describe why the preferred candidate was rejected.
     public func fetchThumbnail(videoURL: String, fallbackURL: String?) async throws -> Data {
         var candidates: [String] = []
         if let id = Self.videoID(from: videoURL) {

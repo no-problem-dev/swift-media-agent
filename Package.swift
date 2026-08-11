@@ -11,17 +11,19 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.4.0"),
-        // Tool プロトコル・JSONSchema・SystemPrompt（プロバイダー非依存の契約層）
+        // Tool protocol, JSONSchema and SystemPrompt: the provider-independent contract layer.
         .package(url: "https://github.com/no-problem-dev/swift-llm-client.git", from: "3.4.0"),
-        // AgentCard（A2A エージェントとしての自己記述）
+        // AgentCard: how the agent describes itself to A2A callers.
         .package(url: "https://github.com/no-problem-dev/swift-a2a.git", from: "0.7.0"),
     ],
     targets: [
-        // Layer 0: セッションスコープのメディア成果物ストア + 検証（UI / LLM / ネットワーク非依存）
+        // Stores media artifacts on disk per session and validates image bytes.
+        // Depends on no UI, no LLM and no network.
         .target(
             name: "MediaStore"
         ),
-        // Layer 1: メディア準備ツール群（生成・検索・取得検証・チャート・動画参照）
+        // The LLM-callable tools that produce media: generation, web search,
+        // fetch-and-validate, chart rendering and video references.
         .target(
             name: "MediaAgentTools",
             dependencies: [
@@ -30,7 +32,8 @@ let package = Package(
                 .product(name: "LLMTool", package: "swift-llm-client"),
             ]
         ),
-        // Layer 2: visualizer エージェントの組立（system prompt / AgentCard / ToolSet ファクトリ）
+        // Assembles the visualizer agent: system prompt, AgentCard and ToolSet
+        // factories. Carries no execution machinery of its own.
         .target(
             name: "MediaAgent",
             dependencies: [

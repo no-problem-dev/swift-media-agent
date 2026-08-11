@@ -1,10 +1,12 @@
-/// visualizer のツール ID 一覧（SSOT）。
+/// The single vocabulary for switching visualizer tools on and off.
 ///
-/// ホストはこの ID でツールの有効/無効を選び、同じセットを
-/// `MediaToolKit.tools(enabled:)` と `VisualizerAgent.systemPrompt(tools:)` /
-/// `VisualizerAgent.agentDescription(tools:)` の全てへ渡す —
-/// ツール一式・プロンプトの言及・委譲ルーティングの自己記述が常に一致する。
-/// 表示用コピー（日本語要約など）はホスト UI 層が所有する。
+/// Pass one and the same set to `MediaToolKit.tools(enabled:)`,
+/// `VisualizerAgent.systemPrompt(tools:language:)` and `VisualizerAgent.agentDescription(tools:)`:
+/// each prunes itself against that set, so the tools that exist, the tools the prompt talks about,
+/// and the capabilities advertised for delegation stay in agreement. Passing different sets is what
+/// makes a prompt instruct the model to call a tool it was never given.
+///
+/// User-facing copy for these tools belongs to the host's UI layer, not here.
 public enum MediaToolID: String, CaseIterable, Codable, Hashable, Sendable {
     case generateImage = "generate_image"
     case generateUIImage = "generate_ui_image"
@@ -15,9 +17,10 @@ public enum MediaToolID: String, CaseIterable, Codable, Hashable, Sendable {
     case createChart = "create_chart"
     case listSavedMedia = "list_saved_media"
 
-    /// マニフェスト機構の土台で、無効化できないツール。
-    /// save 系はホストから渡された URL の検証・保存にも使われ、
-    /// list_saved_media は最終マニフェストの根拠なので常に同伴する。
+    /// Survives every `enabled` set, because the manifest machinery does not work without it.
+    ///
+    /// The save tools stay because they also validate and store URLs the host supplies directly;
+    /// `list_saved_media` stays because the final reply's manifest is built from its output.
     public var isCore: Bool {
         switch self {
         case .saveImageURL, .saveVideoReference, .listSavedMedia: true
@@ -25,8 +28,10 @@ public enum MediaToolID: String, CaseIterable, Codable, Hashable, Sendable {
         }
     }
 
-    /// 動作に Web 検索プロバイダ（Serper 等）が要るツール。
-    /// プロバイダ未構成なら enabled に含めても提供されない。
+    /// Needs a web search provider such as Serper.
+    ///
+    /// Without one the tool is dropped from the toolkit even when `enabled` names it, so the model
+    /// never sees it and never fails on it.
     public var requiresSearchProvider: Bool {
         switch self {
         case .searchImages, .searchVideos: true
@@ -34,20 +39,26 @@ public enum MediaToolID: String, CaseIterable, Codable, Hashable, Sendable {
         }
     }
 
-    /// 動作に画像生成モデルが要るツール。
+    /// Needs a cloud image generation model, which in the stock configuration means a Gemini API key.
+    ///
+    /// A toolkit built without a generator drops the tool rather than letting it fail at call time.
     public var requiresImageGenerator: Bool {
         self == .generateImage
     }
 
-    /// 動作にオンデバイス画像生成（Apple Image Playground）が要るツール。
-    /// デバイス非対応なら enabled に含めても提供されない。
+    /// Needs on-device generation through Apple Image Playground, which requires Apple Intelligence
+    /// and a downloaded image model.
+    ///
+    /// Hosts gate on `PlaygroundImageGenerator.isSupported` and pass no generator otherwise, which
+    /// drops the tool instead of exposing one that cannot run on this device.
     public var requiresOnDeviceImageGenerator: Bool {
         self == .generateUIImage
     }
 
-    /// 無効化できないコアツールのセット。
+    /// The floor of every configuration: `MediaToolKit.tools(enabled:)` unions this into whatever
+    /// set it is handed.
     public static let coreTools: Set<MediaToolID> = Set(allCases.filter(\.isCore))
 
-    /// 全ツールのセット（デフォルト = 全部オン）。
+    /// Every case, and the default wherever an `enabled` set is accepted.
     public static let allTools: Set<MediaToolID> = Set(allCases)
 }

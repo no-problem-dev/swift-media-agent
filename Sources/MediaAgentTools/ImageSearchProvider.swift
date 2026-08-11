@@ -1,6 +1,7 @@
 import Foundation
 
-/// 画像検索の 1 候補。保存はまだしていない（save_image_url で検証 + 保存する）。
+/// One image search candidate. Nothing has been downloaded or checked yet — `save_image_url` does
+/// that, and a candidate can still fail validation there.
 public struct ImageSearchHit: Sendable, Codable, Equatable {
     public let title: String
     public let imageURL: String
@@ -17,13 +18,15 @@ public struct ImageSearchHit: Sendable, Codable, Equatable {
     }
 }
 
-/// Web 画像検索の抽象。`MediaToolKit` に注入してテストでモックに差し替える。
+/// Web image search, injected into `MediaToolKit`. Leaving it `nil` removes `search_images` from
+/// the toolkit rather than causing a failure later.
 public protocol ImageSearchProvider: Sendable {
-    /// クエリで画像を検索し、最大 `count` 件の候補を返す。
+    /// Searches for images and returns at most `count` candidates; fewer, or none, is a normal result.
     func searchImages(query: String, count: Int) async throws -> [ImageSearchHit]
 }
 
-/// 動画検索の 1 候補。
+/// One video search candidate. Its existence is unverified until `save_video_reference` resolves it
+/// through oEmbed.
 public struct VideoSearchHit: Sendable, Codable, Equatable {
     public let title: String
     public let videoURL: String
@@ -38,16 +41,20 @@ public struct VideoSearchHit: Sendable, Codable, Equatable {
     }
 }
 
-/// Web 動画検索の抽象。`MediaToolKit` に注入してテストでモックに差し替える。
+/// Web video search, injected into `MediaToolKit`. Leaving it `nil` removes `search_videos` from
+/// the toolkit rather than causing a failure later.
 public protocol VideoSearchProvider: Sendable {
-    /// クエリで動画を検索し、最大 `count` 件の候補を返す。
+    /// Searches for videos and returns at most `count` candidates, in practice mostly YouTube.
     func searchVideos(query: String, count: Int) async throws -> [VideoSearchHit]
 }
 
 // MARK: - Serper
 
-/// Serper (google.serper.dev) の画像・動画検索。
-/// デモが既に Serper キーを持つため第一候補（Bing API は廃止、Google CSE は 2027-01 廃止予定）。
+/// Image and video search through Serper (google.serper.dev), covering both provider protocols on
+/// one API key.
+///
+/// Chosen because the alternatives are gone or going: the Bing Search API is retired and Google CSE
+/// shuts down in 2027-01.
 public struct SerperMediaSearchProvider: ImageSearchProvider, VideoSearchProvider {
     public let apiKey: String
     public let gl: String?
