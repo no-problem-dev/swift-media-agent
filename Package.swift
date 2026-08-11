@@ -14,7 +14,7 @@ let package = Package(
         // Tool protocol, JSONSchema and SystemPrompt: the provider-independent contract layer.
         .package(url: "https://github.com/no-problem-dev/swift-llm-client.git", from: "4.0.0"),
         // AgentCard: how the agent describes itself to A2A callers.
-        .package(url: "https://github.com/no-problem-dev/swift-a2a.git", from: "0.7.0"),
+        .package(url: "https://github.com/no-problem-dev/swift-a2a.git", .upToNextMinor(from: "0.8.0")),
     ],
     targets: [
         // Stores media artifacts on disk per session and validates image bytes.
