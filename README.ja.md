@@ -62,7 +62,7 @@ if let fileURL = MediaSessionStore.fileURL(forStable: stableURL) {
 
 ## ドキュメント
 
-[API ドキュメント](https://no-problem-dev.github.io/swift-media-agent/documentation/mediaagent/)
+[API ドキュメント](Sources/MediaAgent/Documentation.docc)
 
 ## インストール
 
